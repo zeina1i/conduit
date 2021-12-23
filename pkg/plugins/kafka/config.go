@@ -31,6 +31,7 @@ const (
 	Acks              = "acks"
 	DeliveryTimeout   = "deliveryTimeout"
 	ReadFromBeginning = "readFromBeginning"
+	AckAll            = "all"
 )
 
 var Required = []string{Servers, Topic}
