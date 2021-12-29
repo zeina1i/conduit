@@ -48,16 +48,16 @@ type segmentConsumer struct {
 	brokers []string
 	topic   string
 
-	// readers is a map of IDs of partition to respective readers
+	// maps partition IDs to respective readers
 	// segmentio/kafka-go requires a reader per partition
 	readers map[int]*kafka.Reader
-	// client is used for getting topic-level information
+	// used for getting topic-level information
 	client *kafka.Client
-	// positions maps partition IDs to this consumer's position (offset) with the respective partition
+	// maps partition IDs to this consumer's position (offset) with the respective partition
 	positions map[int]int64
-	// msgs is a channel where all partition readers push messages to
+	// a channel where all partition readers push messages to
 	msgs chan kafka.Message
-	// errors is a channel where all partition readers push errors to
+	// a channel where all partition readers push errors to
 	errors chan error
 }
 
@@ -93,6 +93,10 @@ func (c *segmentConsumer) Get() (*kafka.Message, map[int]int64, error) {
 	for {
 		select {
 		case msg := <-c.msgs:
+			// todo consider getting offsets from the readers.
+			// while that would eliminate the need for a field (segmentConsumer.positions)
+			// it would add an overhead to each messages being read
+			// (iterate over all readers)
 			return &msg, c.updatePosition(&msg), nil
 		case err := <-c.errors:
 			return nil, nil, cerrors.Errorf("couldn't read message: %w", err)
@@ -113,10 +117,10 @@ func (c *segmentConsumer) updatePosition(msg *kafka.Message) map[int]int64 {
 }
 
 func (c *segmentConsumer) Close() {
-	// todo also make sure reader goroutines are stopped
 	if len(c.readers) == 0 {
 		return
 	}
+	// this will also make the loops in the reader goroutines stop
 	for p, r := range c.readers {
 		err := r.Close()
 		if err != nil {

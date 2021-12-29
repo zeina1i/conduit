@@ -31,8 +31,8 @@ type staticBalancer struct {
 	partition int
 }
 
-func (s staticBalancer) Balance(msg kafka.Message, partitions ...int) (partition int) {
-	return partition
+func (s staticBalancer) Balance(msg kafka.Message, partitions ...int) int {
+	return s.partition
 }
 
 func TestConfluentClient_StartFrom_EmptyPosition(t *testing.T) {
