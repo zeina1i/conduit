@@ -25,8 +25,8 @@ import (
 	"github.com/conduitio/conduit/pkg/plugins"
 	"github.com/conduitio/conduit/pkg/plugins/kafka/mock"
 	"github.com/conduitio/conduit/pkg/record"
-	"github.com/confluentinc/confluent-kafka-go/kafka"
 	"github.com/golang/mock/gomock"
+	"github.com/segmentio/kafka-go"
 )
 
 func TestOpenSource_FailsWhenConfigEmpty(t *testing.T) {
@@ -84,15 +84,15 @@ func testReadPosition(t *testing.T, pos record.Position) {
 
 	kafkaMsg := testKafkaMsg()
 	cfg := connectorCfg()
-	expPos := map[int32]int64{}
+	expPos := map[int]int64{}
 
 	consumerMock := mock.NewConsumer(ctrl)
 	consumerMock.
 		EXPECT().
-		StartFrom(cfg.Topic, map[int32]int64{}, cfg.ReadFromBeginning)
+		StartFrom(cfg.Topic, map[int]int64{}, cfg.ReadFromBeginning)
 	consumerMock.
 		EXPECT().
-		Get(msgTimeout).
+		Get().
 		Return(kafkaMsg, expPos, nil)
 
 	underTest := Source{Consumer: consumerMock, Config: cfg}
@@ -101,7 +101,7 @@ func testReadPosition(t *testing.T, pos record.Position) {
 	assert.Equal(t, rec.Key.Bytes(), kafkaMsg.Key)
 	assert.Equal(t, rec.Payload.Bytes(), kafkaMsg.Value)
 
-	var actPos map[int32]int64
+	var actPos map[int]int64
 	err = json.Unmarshal(rec.Position, &actPos)
 	assert.Ok(t, err)
 	assert.Equal(t, expPos, actPos)
@@ -111,10 +111,10 @@ func TestRead_StartFromCalledOnce(t *testing.T) {
 	ctrl := gomock.NewController(t)
 
 	cfg := connectorCfg()
-	pos1 := map[int32]int64{0: 122, 1: 455}
+	pos1 := map[int]int64{0: 122, 1: 455}
 	pos1Bytes, _ := json.Marshal(pos1)
 
-	pos2 := map[int32]int64{0: 122, 1: 456}
+	pos2 := map[int]int64{0: 122, 1: 456}
 	pos2Bytes, _ := json.Marshal(pos2)
 
 	consumerMock := mock.NewConsumer(ctrl)
@@ -123,12 +123,12 @@ func TestRead_StartFromCalledOnce(t *testing.T) {
 		StartFrom(cfg.Topic, pos1, cfg.ReadFromBeginning)
 	consumerMock.
 		EXPECT().
-		Get(msgTimeout).
+		Get().
 		Return(testKafkaMsg(), pos2, nil).
 		Times(1)
 	consumerMock.
 		EXPECT().
-		Get(msgTimeout).
+		Get().
 		Return(nil, pos2, nil).
 		Times(1)
 
@@ -144,9 +144,9 @@ func TestRead(t *testing.T) {
 
 	kafkaMsg := testKafkaMsg()
 	cfg := connectorCfg()
-	startPos := map[int32]int64{0: 122, 1: 455}
+	startPos := map[int]int64{0: 122, 1: 455}
 	startPosBytes, _ := json.Marshal(startPos)
-	expPos := map[int32]int64{0: 123, 1: 456}
+	expPos := map[int]int64{0: 123, 1: 456}
 
 	consumerMock := mock.NewConsumer(ctrl)
 	consumerMock.
@@ -154,7 +154,7 @@ func TestRead(t *testing.T) {
 		StartFrom(cfg.Topic, startPos, cfg.ReadFromBeginning)
 	consumerMock.
 		EXPECT().
-		Get(msgTimeout).
+		Get().
 		Return(kafkaMsg, expPos, nil)
 
 	underTest := Source{Consumer: consumerMock, Config: cfg}
@@ -163,7 +163,7 @@ func TestRead(t *testing.T) {
 	assert.Equal(t, rec.Key.Bytes(), kafkaMsg.Key)
 	assert.Equal(t, rec.Payload.Bytes(), kafkaMsg.Value)
 
-	var actPos map[int32]int64
+	var actPos map[int]int64
 	err = json.Unmarshal(rec.Position, &actPos)
 	assert.Ok(t, err)
 	assert.Equal(t, expPos, actPos)
@@ -188,11 +188,11 @@ func TestRead_NilMsgReturned(t *testing.T) {
 	consumerMock := mock.NewConsumer(ctrl)
 	consumerMock.
 		EXPECT().
-		StartFrom(cfg.Topic, map[int32]int64{}, cfg.ReadFromBeginning)
+		StartFrom(cfg.Topic, map[int]int64{}, cfg.ReadFromBeginning)
 	consumerMock.
 		EXPECT().
-		Get(msgTimeout).
-		Return(nil, map[int32]int64{}, nil)
+		Get().
+		Return(nil, map[int]int64{}, nil)
 
 	underTest := Source{Consumer: consumerMock, Config: cfg}
 	rec, err := underTest.Read(context.TODO(), record.Position{})
@@ -203,12 +203,12 @@ func TestRead_NilMsgReturned(t *testing.T) {
 
 func testKafkaMsg() *kafka.Message {
 	return &kafka.Message{
-		TopicPartition: kafka.TopicPartition{},
-		Value:          []byte("test-value"),
-		Key:            []byte("test-key"),
-		Timestamp:      time.Time{},
-		TimestampType:  0,
-		Opaque:         nil,
-		Headers:        nil,
+		Topic:         "test",
+		Partition:     0,
+		Offset:        123,
+		HighWaterMark: 234,
+		Key:           []byte("test-key"),
+		Value:         []byte("test-value"),
+		Time:          time.Time{},
 	}
 }

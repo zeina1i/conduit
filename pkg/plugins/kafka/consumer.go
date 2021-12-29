@@ -17,11 +17,11 @@
 package kafka
 
 import (
+	"context"
 	"fmt"
-	"time"
 
 	"github.com/conduitio/conduit/pkg/foundation/cerrors"
-	"github.com/confluentinc/confluent-kafka-go/kafka"
+	"github.com/segmentio/kafka-go"
 )
 
 type Consumer interface {
@@ -31,7 +31,7 @@ type Consumer interface {
 	// A nil message, the client's position in Kafka, and a nil error,
 	// if no message was retrieved within the specified timeout, OR
 	// A nil message, nil position and an error if there was an error while retrieving the message (e.g. broker down).
-	Get(timeout time.Duration) (*kafka.Message, map[int32]int64, error)
+	Get() (*kafka.Message, map[int]int64, error)
 
 	// Close this consumer and the associated resources (e.g. connections to the broker)
 	Close()
@@ -41,150 +41,124 @@ type Consumer interface {
 	// the reading behavior is specified by 'readFromBeginning' parameter:
 	// if 'true', then all messages will be read, if 'false', only new messages will be read.
 	// Returns: An error, if the consumer could not be set to read from the given position, nil otherwise.
-	StartFrom(topic string, position map[int32]int64, readFromBeginning bool) error
+	StartFrom(topic string, position map[int]int64, readFromBeginning bool) error
 }
 
-type confluentConsumer struct {
-	Consumer  *kafka.Consumer
-	positions map[int32]int64
+type segmentConsumer struct {
+	brokers []string
+	topic   string
+
+	// readers is a map of IDs of partition to respective readers
+	// segmentio/kafka-go requires a reader per partition
+	readers map[int]*kafka.Reader
+	// client is used for getting topic-level information
+	client *kafka.Client
+	// positions maps partition IDs to this consumer's position (offset) with the respective partition
+	positions map[int]int64
+	// msgs is a channel where all partition readers push messages to
+	msgs chan kafka.Message
+	// errors is a channel where all partition readers push errors to
+	errors chan error
 }
 
 // NewConsumer creates a new Kafka consumer.
-// The current implementation uses Confluent's Kafka client.
-// Full list of configuration properties is available here:
-// https://github.com/edenhill/librdkafka/blob/master/CONFIGURATION.md
 func NewConsumer(config Config) (Consumer, error) {
-	consumer, err := kafka.NewConsumer(config.AsKafkaCfg())
-	if err != nil {
-		return nil, cerrors.Errorf("couldn't create consumer: %w", err)
+	// todo if we can assume that a new Config instance will always be created by calling Parse(),
+	// and that the instance will not be mutated, then we can leave it out these checks.
+	if len(config.Servers) == 0 {
+		return nil, ErrServersMissing
 	}
-	return &confluentConsumer{Consumer: consumer, positions: map[int32]int64{}}, nil
+	if config.Topic == "" {
+		return nil, ErrTopicMissing
+	}
+	c := &kafka.Client{Addr: kafka.TCP(config.Servers...)}
+
+	consumer := &segmentConsumer{
+		brokers:   config.Servers,
+		topic:     config.Topic,
+		readers:   make(map[int]*kafka.Reader),
+		client:    c,
+		positions: map[int]int64{},
+		msgs:      make(chan kafka.Message),
+		errors:    make(chan error),
+	}
+	err := consumer.refreshReaders()
+	if err != nil {
+		return nil, cerrors.Errorf("couldn't refresh readers: %w", err)
+	}
+	return consumer, nil
 }
 
-func (c *confluentConsumer) Get(timeout time.Duration) (*kafka.Message, map[int32]int64, error) {
-	if c.noPositions() {
-		return nil, nil, cerrors.New("no positions set, call StartFrom first")
-	}
-
-	endAt := time.Now().Add(timeout)
-	for timeLeft := -time.Since(endAt); timeLeft > 0; timeLeft = -time.Since(endAt) {
-		event := c.Consumer.Poll(int(timeLeft.Milliseconds()))
-		// there are events of other types, but we're not interested in those.
-		// More info is available here:
-		// https://docs.confluent.io/5.5.0/clients/confluent-kafka-go/index.html#hdr-Consumer_events
-		switch v := event.(type) {
-		case *kafka.Message:
-			return v, c.updatePosition(v), nil
-		case kafka.Error:
-			return nil, nil, cerrors.Errorf("received error from client %v", v)
+func (c *segmentConsumer) Get() (*kafka.Message, map[int]int64, error) {
+	for {
+		select {
+		case msg := <-c.msgs:
+			return &msg, c.updatePosition(&msg), nil
+		case err := <-c.errors:
+			return nil, nil, cerrors.Errorf("couldn't read message: %w", err)
 		}
 	}
-	// no message, no error
-	return nil, c.updatePosition(nil), nil
 }
 
-func (c *confluentConsumer) StartFrom(topic string, position map[int32]int64, readFromBeginning bool) error {
-	defaultOffsets, err := c.defaultOffsets(topic, readFromBeginning)
-	if err != nil {
-		return cerrors.Errorf("couldn't get default offsets: %w", err)
-	}
-
-	completePos := merge(defaultOffsets, position)
-	partitions, err := toKafkaPositions(&topic, completePos)
-	if err != nil {
-		return cerrors.Errorf("couldn't get offsets: %w", err)
-	}
-
-	err = c.Consumer.Assign(partitions)
-	if err != nil {
-		return cerrors.Errorf("couldn't assign partitions: %w", err)
-	}
-
-	c.positions = completePos
+func (c *segmentConsumer) StartFrom(topic string, position map[int]int64, readFromBeginning bool) error {
 	return nil
 }
 
-func (c *confluentConsumer) defaultOffsets(topic string, readFromBeginning bool) (map[int32]int64, error) {
-	// to get the number of partitions
-	partitions, err := c.countPartitions(topic)
-	if err != nil {
-		return nil, cerrors.Errorf("couldn't count partitions: %w", err)
-	}
-	offsets := map[int32]int64{}
-
-	// get last offset for each partition
-	for i := 0; i < partitions; i++ {
-		lo, hi, err := c.Consumer.QueryWatermarkOffsets(topic, int32(i), 5000)
-		if err != nil {
-			return nil, cerrors.Errorf("couldn't get default offsets: %w", err)
-		}
-		offset := hi
-		if readFromBeginning {
-			offset = lo
-		}
-		offsets[int32(i)] = offset
-	}
-	return offsets, nil
-}
-
-func (c *confluentConsumer) countPartitions(topic string) (int, error) {
-	metadata, err := c.Consumer.GetMetadata(&topic, false, 10000)
-	if err != nil {
-		return 0, cerrors.Errorf("couldn't get metadata: %w", err)
-	}
-	return len(metadata.Topics[topic].Partitions), nil
-}
-
-func toKafkaPositions(topic *string, position map[int32]int64) ([]kafka.TopicPartition, error) {
-	partitions := make([]kafka.TopicPartition, 0, len(position))
-	for k, v := range position {
-		offset, err := kafka.NewOffset(v)
-		if err != nil {
-			return nil, cerrors.Errorf("invalid offset: %w", err)
-		}
-		partitions = append(partitions, kafka.TopicPartition{Topic: topic, Partition: k, Offset: offset})
-	}
-	return partitions, nil
-}
-
-func (c *confluentConsumer) updatePosition(msg *kafka.Message) map[int32]int64 {
+func (c *segmentConsumer) updatePosition(msg *kafka.Message) map[int]int64 {
 	if msg == nil {
 		return c.positions
 	}
-	c.positions[msg.TopicPartition.Partition] = c.increment(msg.TopicPartition.Offset)
+	c.positions[msg.Partition] = msg.Offset + 1
 	return c.positions
 }
 
-func (c *confluentConsumer) increment(offset kafka.Offset) int64 {
-	switch offset {
-	case kafka.OffsetBeginning, kafka.OffsetEnd, kafka.OffsetInvalid, kafka.OffsetStored:
-		panic(cerrors.Errorf("got unexpected offset %v", offset))
-	default:
-		return int64(offset) + 1
-	}
-}
-
-func (c *confluentConsumer) Close() {
-	if c.Consumer == nil {
+func (c *segmentConsumer) Close() {
+	// todo also make sure reader goroutines are stopped
+	if len(c.readers) == 0 {
 		return
 	}
-	err := c.Consumer.Close()
+	for p, r := range c.readers {
+		err := r.Close()
+		if err != nil {
+			fmt.Printf("couldn't close reader for partition %v due to error: %v\n", p, err)
+		}
+	}
+}
+
+// refreshReaders is creating a kafka.Reader for each partition, for which no reader exists yet.
+// todo call it periodically, since partitions can be added to a topic
+func (c *segmentConsumer) refreshReaders() error {
+	req := &kafka.MetadataRequest{Topics: []string{c.topic}}
+	metadata, err := c.client.Metadata(context.Background(), req)
 	if err != nil {
-		fmt.Printf("couldn't close consumer due to error: %v\n", err)
+		return cerrors.Errorf("couldn't fetch topic metadata: %w", err)
 	}
+	for _, partition := range metadata.Topics[0].Partitions {
+		// reader for this partition already exists
+		if _, ok := c.readers[partition.ID]; ok {
+			continue
+		}
+		// NB: NewReader will panic if the ReaderConfig is invalid.
+		reader := kafka.NewReader(kafka.ReaderConfig{
+			Brokers:   c.brokers,
+			Topic:     c.topic,
+			Partition: partition.ID,
+		})
+		c.start(reader)
+		c.readers[partition.ID] = reader
+	}
+	return nil
 }
 
-func (c *confluentConsumer) noPositions() bool {
-	return len(c.positions) == 0
-}
-
-func merge(first map[int32]int64, second map[int32]int64) map[int32]int64 {
-	merged := map[int32]int64{}
-	for k, v := range first {
-		merged[k] = v
-	}
-	for k, v := range second {
-		merged[k] = v
-	}
-	return merged
+func (c *segmentConsumer) start(r *kafka.Reader) {
+	go func() {
+		for {
+			m, err := r.ReadMessage(context.Background())
+			if err != nil {
+				c.errors <- err
+				break
+			}
+			c.msgs <- m
+		}
+	}()
 }

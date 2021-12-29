@@ -24,10 +24,8 @@ import (
 	"github.com/conduitio/conduit/pkg/foundation/cerrors"
 	"github.com/conduitio/conduit/pkg/plugins"
 	"github.com/conduitio/conduit/pkg/record"
-	"github.com/confluentinc/confluent-kafka-go/kafka"
+	"github.com/segmentio/kafka-go"
 )
-
-const msgTimeout = time.Second * 5
 
 type Source struct {
 	Consumer         Consumer
@@ -69,7 +67,7 @@ func (s *Source) Read(ctx context.Context, position record.Position) (record.Rec
 		return record.Record{}, cerrors.Errorf("couldn't start from position: %w", err)
 	}
 
-	message, positions, err := s.Consumer.Get(msgTimeout)
+	message, positions, err := s.Consumer.Get()
 	if err != nil {
 		return record.Record{}, cerrors.Errorf("failed getting a message %w", err)
 	}
@@ -107,12 +105,12 @@ func (s *Source) startFrom(position record.Position) error {
 	return nil
 }
 
-func toKafkaPosition(position record.Position) (map[int32]int64, error) {
+func toKafkaPosition(position record.Position) (map[int]int64, error) {
 	if position == nil || len(position) == 0 {
-		return map[int32]int64{}, nil
+		return map[int]int64{}, nil
 	}
 
-	var p map[int32]int64
+	var p map[int]int64
 	err := json.Unmarshal(position, &p)
 	if err != nil {
 		return nil, cerrors.Errorf("couldn't deserialize position %w", err)
@@ -120,7 +118,7 @@ func toKafkaPosition(position record.Position) (map[int32]int64, error) {
 	return p, nil
 }
 
-func toRecord(message *kafka.Message, position map[int32]int64) (record.Record, error) {
+func toRecord(message *kafka.Message, position map[int]int64) (record.Record, error) {
 	posBytes, err := json.Marshal(position)
 	if err != nil {
 		return record.Record{}, cerrors.Errorf("couldn't serialize position %w", err)

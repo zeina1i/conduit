@@ -34,7 +34,7 @@ func TestNewProducer_MissingRequired(t *testing.T) {
 		},
 		{
 			name:   "topic missing",
-			config: Config{Servers: "irrelevant servers"},
+			config: Config{Servers: []string{"irrelevant servers"}},
 			exp:    ErrTopicMissing,
 		},
 	}
@@ -46,41 +46,6 @@ func TestNewProducer_MissingRequired(t *testing.T) {
 			assert.Nil(t, producer)
 			assert.Error(t, err)
 			assert.True(t, cerrors.Is(err, tc.exp), "expected "+tc.exp.Error())
-		})
-	}
-}
-
-func TestNewProducer_InvalidServers(t *testing.T) {
-	testCases := []struct {
-		name   string
-		config Config
-		exp    string
-	}{
-		{
-			name: "empty server string in the middle",
-			config: Config{
-				Servers: "host1:1111,,host2:2222",
-				Topic:   "topic",
-			},
-			exp: "invalid servers: empty 1. server",
-		},
-		{
-			name: "single blank server string",
-			config: Config{
-				Servers: "     ",
-				Topic:   "topic",
-			},
-			exp: "invalid servers: empty 0. server",
-		},
-	}
-
-	for _, tc := range testCases {
-		tc := tc
-		t.Run(tc.name, func(t *testing.T) {
-			producer, err := NewProducer(tc.config)
-			assert.Nil(t, producer)
-			assert.Error(t, err)
-			assert.Equal(t, tc.exp, err.Error())
 		})
 	}
 }

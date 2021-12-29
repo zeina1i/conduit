@@ -6,10 +6,9 @@ package mock
 
 import (
 	reflect "reflect"
-	time "time"
 
-	kafka "github.com/confluentinc/confluent-kafka-go/kafka"
 	gomock "github.com/golang/mock/gomock"
+	kafka "github.com/segmentio/kafka-go"
 )
 
 // Consumer is a mock of Consumer interface.
@@ -48,23 +47,23 @@ func (mr *ConsumerMockRecorder) Close() *gomock.Call {
 }
 
 // Get mocks base method.
-func (m *Consumer) Get(arg0 time.Duration) (*kafka.Message, map[int32]int64, error) {
+func (m *Consumer) Get() (*kafka.Message, map[int]int64, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "Get", arg0)
+	ret := m.ctrl.Call(m, "Get")
 	ret0, _ := ret[0].(*kafka.Message)
-	ret1, _ := ret[1].(map[int32]int64)
+	ret1, _ := ret[1].(map[int]int64)
 	ret2, _ := ret[2].(error)
 	return ret0, ret1, ret2
 }
 
 // Get indicates an expected call of Get.
-func (mr *ConsumerMockRecorder) Get(arg0 interface{}) *gomock.Call {
+func (mr *ConsumerMockRecorder) Get() *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Get", reflect.TypeOf((*Consumer)(nil).Get), arg0)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Get", reflect.TypeOf((*Consumer)(nil).Get))
 }
 
 // StartFrom mocks base method.
-func (m *Consumer) StartFrom(arg0 string, arg1 map[int32]int64, arg2 bool) error {
+func (m *Consumer) StartFrom(arg0 string, arg1 map[int]int64, arg2 bool) error {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "StartFrom", arg0, arg1, arg2)
 	ret0, _ := ret[0].(error)
