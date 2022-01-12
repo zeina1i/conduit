@@ -61,6 +61,9 @@ func (s *Source) Validate(cfg plugins.Config) error {
 	return err
 }
 
+// Read is currently violating the contract given in the Source interface.
+// Namely, currently it's returning the position of the next record, not the record actually returned.
+// todo fix this violation
 func (s *Source) Read(ctx context.Context, position record.Position) (record.Record, error) {
 	err := s.startFrom(position)
 	if err != nil {
@@ -92,7 +95,7 @@ func (s *Source) startFrom(position record.Position) error {
 	if s.lastPositionRead != nil && bytes.Equal(s.lastPositionRead, position) {
 		return nil
 	}
-	positionMap, err := toKafkaPosition(position)
+	positionMap, err := parsePosition(position)
 	if err != nil {
 		return cerrors.Errorf("invalid position %v %w", string(position), err)
 	}
@@ -105,7 +108,7 @@ func (s *Source) startFrom(position record.Position) error {
 	return nil
 }
 
-func toKafkaPosition(position record.Position) (map[int]int64, error) {
+func parsePosition(position record.Position) (map[int]int64, error) {
 	if position == nil || len(position) == 0 {
 		return map[int]int64{}, nil
 	}

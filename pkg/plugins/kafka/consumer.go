@@ -26,6 +26,7 @@ import (
 
 type Consumer interface {
 	// Get returns a message from the configured topic, waiting at most 'timeoutMs' milliseconds.
+	// Important note: The Consumer's position in Kafka is the position of the NEXT message.
 	// Returns:
 	// A message and the client's 'position' in Kafka, if there's no error, OR
 	// A nil message, the client's position in Kafka, and a nil error,
@@ -82,10 +83,7 @@ func NewConsumer(config Config) (Consumer, error) {
 		msgs:      make(chan kafka.Message),
 		errors:    make(chan error),
 	}
-	err := consumer.refreshReaders()
-	if err != nil {
-		return nil, cerrors.Errorf("couldn't refresh readers: %w", err)
-	}
+
 	return consumer, nil
 }
 
@@ -105,9 +103,61 @@ func (c *segmentConsumer) Get() (*kafka.Message, map[int]int64, error) {
 }
 
 func (c *segmentConsumer) StartFrom(topic string, position map[int]int64, readFromBeginning bool) error {
+	// readFromBeginning is relevant only when consuming messages from a topic for the first time.
+	// All messages from newly created partitions are new messages, so we read all of them.
+	var realPositions = copyMap(position)
+	if len(realPositions) == 0 {
+		fetched, err := c.fetchOffsets(topic, readFromBeginning)
+		if err != nil {
+			return cerrors.Errorf("couldn't fetch topic metadata: %w", err)
+		}
+		realPositions = fetched
+	}
+
+	c.positions = realPositions
+	return c.configureReaders()
+}
+
+func copyMap(orig map[int]int64) map[int]int64 {
+	var mcopy = make(map[int]int64)
+	for k, v := range orig {
+		mcopy[k] = v
+	}
+	return mcopy
+}
+
+func (c *segmentConsumer) configureReaders() error {
+	partitions, err := c.countPartitions()
+	if err != nil {
+		return cerrors.Errorf("couldn't fetch topic metadata: %w", err)
+	}
+	// go through partitions which are in the topic, compare with the positions and readers we have
+	for i := 0; i < partitions; i++ {
+		offset, ok := c.positions[i]
+		// new partition (i.e. created after the consumer was started)
+		if !ok {
+			offset = 0
+		}
+		// create reader, if it doesn't already exist
+		reader, ok := c.readers[i]
+		if !ok {
+			reader = kafka.NewReader(kafka.ReaderConfig{
+				Brokers:   c.brokers,
+				Topic:     c.topic,
+				Partition: i,
+			})
+			c.readers[i] = reader
+		}
+		err = reader.SetOffset(offset)
+		if err != nil {
+			return cerrors.Errorf("couldn't set offset for reader for %v/%v: %w", c.topic, i, err)
+		}
+		c.start(reader)
+	}
 	return nil
 }
 
+// todo make sure semantics about positions is consistent
 func (c *segmentConsumer) updatePosition(msg *kafka.Message) map[int]int64 {
 	if msg == nil {
 		return c.positions
@@ -120,7 +170,7 @@ func (c *segmentConsumer) Close() {
 	if len(c.readers) == 0 {
 		return
 	}
-	// this will also make the loops in the reader goroutines stop
+	// closing the readers will also cause the for loop in start(r *kafka.Reader) to stop
 	for p, r := range c.readers {
 		err := r.Close()
 		if err != nil {
@@ -129,35 +179,20 @@ func (c *segmentConsumer) Close() {
 	}
 }
 
-// refreshReaders is creating a kafka.Reader for each partition, for which no reader exists yet.
-// todo call it periodically, since partitions can be added to a topic
-func (c *segmentConsumer) refreshReaders() error {
+func (c *segmentConsumer) countPartitions() (int, error) {
 	req := &kafka.MetadataRequest{Topics: []string{c.topic}}
 	metadata, err := c.client.Metadata(context.Background(), req)
 	if err != nil {
-		return cerrors.Errorf("couldn't fetch topic metadata: %w", err)
+		return 0, cerrors.Errorf("couldn't fetch topic metadata: %w", err)
 	}
-	for _, partition := range metadata.Topics[0].Partitions {
-		// reader for this partition already exists
-		if _, ok := c.readers[partition.ID]; ok {
-			continue
-		}
-		// NB: NewReader will panic if the ReaderConfig is invalid.
-		reader := kafka.NewReader(kafka.ReaderConfig{
-			Brokers:   c.brokers,
-			Topic:     c.topic,
-			Partition: partition.ID,
-		})
-		c.start(reader)
-		c.readers[partition.ID] = reader
-	}
-	return nil
+	return len(metadata.Topics[0].Partitions), nil
 }
 
 func (c *segmentConsumer) start(r *kafka.Reader) {
 	go func() {
 		for {
 			m, err := r.ReadMessage(context.Background())
+			// this also includes io.EOF which will be returned when the reader gets closed
 			if err != nil {
 				c.errors <- err
 				break
@@ -165,4 +200,29 @@ func (c *segmentConsumer) start(r *kafka.Reader) {
 			c.msgs <- m
 		}
 	}()
+}
+
+func (c *segmentConsumer) fetchOffsets(topic string, readFromBeginning bool) (map[int]int64, error) {
+	mreq := &kafka.MetadataRequest{Topics: []string{topic}}
+	metadata, err := c.client.Metadata(context.Background(), mreq)
+	if err != nil {
+		return nil, cerrors.Errorf("couldn't fetch offsets for %v: %w", topic, err)
+	}
+	offsets := make(map[int]int64)
+	for _, partition := range metadata.Topics[0].Partitions {
+		req := &kafka.FetchRequest{Topic: topic, Partition: partition.ID, Offset: kafka.LastOffset}
+		resp, err := c.client.Fetch(context.Background(), req)
+		if err != nil {
+			return nil, cerrors.Errorf("couldn't fetch offsets for %v/%v: %w", topic, partition.ID, err)
+		}
+		if readFromBeginning {
+			// todo can we simply put 0 here?
+			offsets[partition.ID] = resp.LogStartOffset
+		} else {
+			// todo HighWatermark?
+			offsets[partition.ID] = resp.LastStableOffset
+		}
+	}
+
+	return offsets, nil
 }

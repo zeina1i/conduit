@@ -19,10 +19,13 @@ package kafka
 import (
 	"context"
 	"fmt"
+	"io"
+	"net"
 	"testing"
 	"time"
 
 	"github.com/conduitio/conduit/pkg/foundation/assert"
+	"github.com/conduitio/conduit/pkg/foundation/cerrors"
 	"github.com/google/uuid"
 	"github.com/segmentio/kafka-go"
 )
@@ -81,16 +84,19 @@ func TestConfluentClient_StartFrom_FromBeginning(t *testing.T) {
 		"test-key-5": true,
 		"test-key-6": true,
 	}
+	var updatedPos map[int]int64
 	for i := 1; i <= 5; i++ {
-		message, _, err := consumer.Get()
+		message, pos, err := consumer.Get()
+		updatedPos = pos
 		assert.NotNil(t, message)
 		assert.Ok(t, err)
 		delete(messagesUnseen, string(message.Key))
 	}
 	assert.Equal(t, 0, len(messagesUnseen))
 
-	message, updatedPos, err := consumer.Get()
-	assert.Ok(t, err)
+	time.AfterFunc(100*time.Millisecond, func() { consumer.Close() })
+	message, _, err := consumer.Get()
+	assert.True(t, cerrors.Is(err, io.EOF), "expected io.EOF")
 	assert.Nil(t, message)
 	assert.Equal(
 		t,
@@ -99,42 +105,13 @@ func TestConfluentClient_StartFrom_FromBeginning(t *testing.T) {
 	)
 }
 
-func TestConfluentClient_StartFrom(t *testing.T) {
-	cases := []struct {
-		name      string
-		cfg       Config
-		positions map[int]int64
-	}{
-		{
-			name: "StartFrom: Only new",
-			cfg: Config{
-				Topic:             "TestConfluentClient_" + uuid.NewString(),
-				Servers:           []string{"localhost:9092"},
-				ReadFromBeginning: false,
-			},
-			positions: map[int]int64{0: 1},
-		},
-		{
-			name: "StartFrom: Simple test",
-			cfg: Config{
-				Topic:   "TestConfluentClient_" + uuid.NewString(),
-				Servers: []string{"localhost:9092"},
-			},
-			positions: map[int]int64{0: 1, 1: 2, 2: 2},
-		},
+func TestConfluentClient_StartFrom_OnlyNew(t *testing.T) {
+	cfg := Config{
+		Topic:             "TestConfluentClient_" + uuid.NewString(),
+		Servers:           []string{"localhost:9092"},
+		ReadFromBeginning: false,
 	}
-
-	for _, tt := range cases {
-		// https://github.com/golang/go/wiki/CommonMistakes#using-goroutines-on-loop-iterator-variables
-		tt := tt
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			testConfluentClient_StartFrom(t, tt.cfg, tt.positions)
-		})
-	}
-}
-
-func testConfluentClient_StartFrom(t *testing.T, cfg Config, positions map[int]int64) {
+	positions := map[int]int64{0: 1, 1: 2, 2: 2}
 	partitions := 3
 	createTopic(t, cfg, partitions)
 
@@ -147,14 +124,15 @@ func testConfluentClient_StartFrom(t *testing.T, cfg Config, positions map[int]i
 	err = consumer.StartFrom(cfg.Topic, positions, cfg.ReadFromBeginning)
 	assert.Ok(t, err)
 
-	message, _, err := consumer.Get()
+	message, updatedPos, err := consumer.Get()
 	assert.NotNil(t, message)
 	assert.Ok(t, err)
 	assert.Equal(t, "test-key-6", string(message.Key))
 	assert.Equal(t, "test-payload-6", string(message.Value))
 
-	message, updatedPos, err := consumer.Get()
-	assert.Ok(t, err)
+	time.AfterFunc(100*time.Millisecond, func() { consumer.Close() })
+	message, _, err = consumer.Get()
+	assert.True(t, cerrors.Is(err, io.EOF), "expected io.EOF")
 	assert.Nil(t, message)
 	assert.Equal(
 		t,
@@ -211,21 +189,18 @@ func sendTestMessage(writer *kafka.Writer, key string, payload string) error {
 	)
 }
 
-//func TestGet_KafkaDown(t *testing.T) {
-//	t.Parallel()
-//
-//	cfg := Config{Topic: "client_integration_test_topic", Servers: "localhost:12345"}
-//	consumer, err := NewConsumer(cfg)
-//	assert.Ok(t, err)
-//
-//	err = consumer.StartFrom(cfg.Topic, map[int]int64{0: 123}, true)
-//	assert.Error(t, err)
-//	var kerr kafka.Error
-//	if !cerrors.As(err, &kerr) {
-//		t.Fatal("expected kafka.Error")
-//	}
-//	assert.Equal(t, kafka.ErrTransport, kerr.Code())
-//}
+func TestGet_KafkaDown(t *testing.T) {
+	t.Parallel()
+
+	cfg := Config{Topic: "client_integration_test_topic", Servers: []string{"localhost:12345"}}
+	consumer, err := NewConsumer(cfg)
+	assert.Ok(t, err)
+
+	err = consumer.StartFrom(cfg.Topic, map[int]int64{0: 123}, true)
+	assert.Error(t, err)
+	var expErr *net.OpError
+	assert.True(t, cerrors.As(err, &expErr), "expected net.OpError")
+}
 
 func createTopic(t *testing.T, cfg Config, partitions int) {
 	c, err := kafka.Dial("tcp", cfg.Servers[0])
