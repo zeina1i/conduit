@@ -199,3 +199,7 @@ func (s *Snapshotter) loadRows(ctx context.Context, db *sql.DB) error {
 	s.tx = tx
 	return nil
 }
+
+func (s *Snapshotter) Push(record.Record) {
+	// NB: Push is a noop in the snapshotter case.
+}
