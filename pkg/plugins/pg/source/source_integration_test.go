@@ -61,8 +61,9 @@ func TestSource_Open(t *testing.T) {
 				ctx: context.Background(),
 				cfg: plugins.Config{
 					Settings: map[string]string{
-						"table": "records",
-						"url":   DBURL,
+						"table":    "records",
+						"url":      DBURL,
+						"snapshot": "disabled",
 					},
 				},
 			},
@@ -105,8 +106,9 @@ func TestSource_Open(t *testing.T) {
 				ctx: context.Background(),
 				cfg: plugins.Config{
 					Settings: map[string]string{
-						"table": "records",
-						"url":   DBURL,
+						"table":    "records",
+						"url":      DBURL,
+						"snapshot": "disabled",
 					},
 				},
 			},
