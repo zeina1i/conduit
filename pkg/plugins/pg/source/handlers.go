@@ -40,7 +40,7 @@ func (s *Source) handleInsert(relID pgtype.OID,
 	// build a payload from values
 	rec = s.withValues(rec, values)
 	// push it into the channel and return
-	s.buffer.Push(rec)
+	s.cdc.Push(rec)
 	return nil
 }
 
@@ -65,7 +65,7 @@ func (s *Source) handleUpdate(
 	// build a payload from values
 	rec = s.withValues(rec, values)
 	// push it into the channel and return
-	s.buffer.Push(rec)
+	s.cdc.Push(rec)
 	return nil
 }
 
@@ -89,7 +89,7 @@ func (s *Source) handleDelete(
 	rec = s.withValues(rec, values)
 
 	// push it into the channel and return nil
-	s.buffer.Push(rec)
+	s.cdc.Push(rec)
 	return nil
 }
 

@@ -28,6 +28,8 @@ import (
 	"github.com/jackc/pgx"
 )
 
+var bufferSize = 1000
+
 // withCDC sets up change data capture for the Postgres Source or returns an
 // error.
 func (s *Source) withCDC(ctx context.Context, cfg plugins.Config) error {
@@ -47,7 +49,7 @@ func (s *Source) withCDC(ctx context.Context, cfg plugins.Config) error {
 	// * this must be a buffered channel or else it will block the handler
 	// on reads and events won't get processed
 	buf := make(chan record.Record, bufferSize)
-	s.buffer = NewIterator(buf)
+	s.cdc = NewIterator(buf)
 
 	// check for the existence of a table field, error if it's not set
 	table, ok := cfg.Settings["table"]

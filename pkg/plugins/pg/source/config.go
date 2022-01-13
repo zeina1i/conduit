@@ -15,13 +15,19 @@
 package source
 
 import (
+	"context"
 	"database/sql"
 	"log"
 	"strings"
 
 	"github.com/conduitio/conduit/pkg/foundation/cerrors"
 	"github.com/conduitio/conduit/pkg/plugins"
+
+	sq "github.com/Masterminds/squirrel"
 )
+
+// Declare Postgres $ placeholder format
+var psql = sq.StatementBuilder.PlaceholderFormat(sq.Dollar)
 
 // withTable sets the table that the Source should read from Postgres or errors
 // if one isn't provided.
@@ -112,5 +118,21 @@ func (s *Source) withColumns(cfg plugins.Config) error {
 	trimmed := strings.TrimSpace(columns)
 	s.columns = strings.Split(trimmed, ",")
 
+	return nil
+}
+
+// withSnapshot is on by default and sets up a Snapshotter that takes a
+// snapshot in a transaction lock of the database before the main plugin
+// operations begin.
+func (s *Source) withSnapshot(ctx context.Context, cfg plugins.Config) error {
+	if v, ok := cfg.Settings["snapshot"]; ok && v == "disabled" {
+		return nil
+	}
+	snap, err := NewSnapshotter(ctx, s.db, s.table, s.columns, s.key)
+	if err != nil {
+		return cerrors.Errorf("failed to set snapshotter: %w", err)
+	}
+	s.snapshotter = snap
+	log.Println("snapshotter created and ready to start.")
 	return nil
 }
