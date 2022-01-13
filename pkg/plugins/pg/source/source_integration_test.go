@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//go:build integration
+// //go:build integration
 
 package source
 
@@ -22,6 +22,7 @@ import (
 	"testing"
 
 	"github.com/conduitio/conduit/pkg/foundation/assert"
+	"github.com/conduitio/conduit/pkg/foundation/cerrors"
 	"github.com/conduitio/conduit/pkg/plugins"
 
 	_ "github.com/lib/pq"
@@ -180,6 +181,44 @@ func TestOpen_Defaults(t *testing.T) {
 	// assert that we are collecting all columns by default
 	assert.Equal(t, []string{"id", "key", "column1", "column2", "column3"}, s.columns)
 	assert.Ok(t, s.Teardown())
+}
+
+func TestIdempotentTeardown(t *testing.T) {
+	_ = getTestPostgres(t)
+	s := &Source{}
+	err := s.Open(context.Background(), plugins.Config{
+		Settings: map[string]string{
+			"table":    "records",
+			"url":      DBURL,
+			"snapshot": "disabled",
+		},
+	})
+	assert.Ok(t, err)
+	// assert that we are keying by id by default
+	assert.Equal(t, s.key, "id")
+	// assert that we are collecting all columns by default
+	assert.Equal(t, []string{"id", "key", "column1", "column2", "column3"}, s.columns)
+	assert.Ok(t, s.Teardown())
+	assert.Ok(t, s.Teardown())
+	assert.Ok(t, s.Teardown())
+}
+
+func TestInterruptedTeardown(t *testing.T) {
+	_ = getTestPostgres(t)
+	s := &Source{}
+	err := s.Open(context.Background(), plugins.Config{
+		Settings: map[string]string{
+			"table": "records",
+			"url":   DBURL,
+		},
+	})
+	assert.Ok(t, err)
+	// assert that we are keying by id by default
+	assert.Equal(t, s.key, "id")
+	// assert that we are collecting all columns by default
+	assert.Equal(t, []string{"id", "key", "column1", "column2", "column3"}, s.columns)
+	err = s.Teardown()
+	assert.True(t, cerrors.Is(err, ErrSnapshotInterrupt), "failed to get interrupt error")
 }
 
 // getTestPostgres is a testing helper that fails if it can't setup a Postgres

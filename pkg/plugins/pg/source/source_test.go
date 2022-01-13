@@ -17,8 +17,10 @@ package source
 import (
 	"context"
 	"database/sql"
+	"sync"
 	"testing"
 
+	"github.com/batchcorp/pgoutput"
 	"github.com/conduitio/conduit/pkg/foundation/assert"
 	"github.com/conduitio/conduit/pkg/foundation/cerrors"
 	"github.com/conduitio/conduit/pkg/plugins"
@@ -187,6 +189,49 @@ func TestSource_Read(t *testing.T) {
 			if diff != "" {
 				t.Logf("[DIFF]: %s", diff)
 				t.Errorf("Source.Read() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestSource_Teardown(t *testing.T) {
+	type fields struct {
+		subWG       sync.WaitGroup
+		killswitch  context.CancelFunc
+		Mutex       sync.Mutex
+		db          *sql.DB
+		table       string
+		columns     []string
+		key         string
+		sub         *pgoutput.Subscription
+		subErr      error
+		cdc         Iterator
+		snapshotter Iterator
+	}
+	tests := []struct {
+		name    string
+		fields  fields
+		wantErr bool
+	}{
+		// TODO: Add test cases.
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := &Source{
+				subWG:       tt.fields.subWG,
+				killswitch:  tt.fields.killswitch,
+				Mutex:       tt.fields.Mutex,
+				db:          tt.fields.db,
+				table:       tt.fields.table,
+				columns:     tt.fields.columns,
+				key:         tt.fields.key,
+				sub:         tt.fields.sub,
+				subErr:      tt.fields.subErr,
+				cdc:         tt.fields.cdc,
+				snapshotter: tt.fields.snapshotter,
+			}
+			if err := s.Teardown(); (err != nil) != tt.wantErr {
+				t.Errorf("Source.Teardown() error = %v, wantErr %v", err, tt.wantErr)
 			}
 		})
 	}
