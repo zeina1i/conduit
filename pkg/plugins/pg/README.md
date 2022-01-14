@@ -8,7 +8,7 @@ method will fail and the Connector will not be ready to Read.
 
 ## Change Data Capture
 This connector implements CDC features for PostgreSQL by reading WAL log events 
-into a buffer that is checked on each Read request after the initial table Rows 
+into a buffer that is checked on each Read request after the initial table rows 
 have been read.
 
 ## CDC  Configuration
@@ -26,8 +26,8 @@ Publication and slot name are user configurable, and must be correctly set.
 The plugin will do what it can to be smart about publication and slot 
 management, but it can't handle everything.
 
-If a replication_url is provided, it will be used for CDC features instead of 
-the url. If no replication_url is provided, but cdc is enabled, then it will 
+If a `replication_url` is provided, it will be used for CDC features instead of 
+the url. If no `replication_url` is provided, but cdc is enabled, then it will 
 attempt to use that url value for CDC features and logical replication setup.
 
 Example configuration for CDC features:
@@ -84,59 +84,60 @@ the name of the key column and $1 is the value of the incremented Position.
 `plugins.ErrEndData` is returned if no row can be found that matches this 
 selection.
 
-## Record Keys
-Position currently references the `key` column when querying. 
-Thus, `key` must be a column of integer, serial or bigserial type, or be a
-string that can be parsed as an integer.
-
-Positions are parsed to integers with `ParseInt` and then parsed back to strings
-with `FormatInt`. `incrementPosition` and `withPosition` respectively handle 
-this logic.
-
+## Key Handling
 If no `key` field is provided, then the connector will attempt to look up the 
 primary key column of the table. If that can't be determined it will error.
 
 ## Configuration 
 The config passed to `Open` can be contain the following fields.
 
-| name             | description                                                                                                                     | required             |
-|------------------|---------------------------------------------------------------------------------------------------------------------------------|----------------------|
-| table            | the name of the table in Postgres that the connector should read                                                                | yes                  |
-| url              | formatted connection string to the database.                                                                                    | yes                  |
-| columns          | comma separated string list of column names that should be built in to each Record's payload.                                   | no                   |
-| key              | column name that records should use for their `Key` fields. defaults to the column's primary key if nothing is specified        | no                   |
-| cdc              | enables CDC features                                                                                                            | req. for CDC mode    |
-| publication_name | name of the publication to listen for WAL events                                                                                | req.  for CDC mode   |
-| slot_name        | name of the slot opened for replication events                                                                                  | req.  for CDC mode   |
-| replication_url  | URL for the CDC connection to use. If no replication_url is provided, then the CDC connection attempts the use the `url` value. | optional in CDC mode |
+| name             | description                                                                                                                     | required             | default              |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------------------- | -------------------- | -------------------- |
+| table            | the name of the table in Postgres that the connector should read                                                                | yes                  | n/a                  |
+| url              | formatted connection string to the database.                                                                                    | yes                  | n/a                  |
+| columns          | comma separated string list of column names that should be built in to each Record's payload.                                   | no                   | `*` (all columns)    |
+| key              | column name that records should use for their `Key` fields. defaults to the column's primary key if nothing is specified        | no                   | primary key of table |
+| snapshot         | whether or not the plugin will take a snapshot of the entire table acquiring a read level lock before starting cdc mode         | n/a                  | enabled              |
+| cdc              | enables CDC features                                                                                                            | req. for CDC mode    | off                  |
+| publication_name | name of the publication to listen for WAL events                                                                                | req. for CDC mode    | `pglogrepl`          |
+| slot_name        | name of the slot opened for replication events                                                                                  | req. for CDC mode    | `pglogrepl_demo`     |
+| replication_url  | URL for the CDC connection to use. If no replication_url is provided, then the CDC connection attempts the use the `url` value. | optional in CDC mode | n/a                  |
 
 ## Columns
 If no column names are provided in the config, then the plugin will assume 
-that all columns in the table should be queried. It will attempt to get the 
+that all columns in the table should be returned. It will attempt to get the 
 column names for the configured table and set them in memory.
 
 ## Record Keys 
 Currently the Postgres source takes a `key` property and uses that column name
-to key records. The key column must be unique and must be able to be parsed 
-as an integer. 
+to key records. The key column must be unique. 
 
-We plan to support alphanumeric and composite record keys soon.
+If no key column is provided then the default primary key of the table will be
+used.
 
 # Roadmap 
 - [x] Change data capture handling
 - [ ] Composite key support 
-- [ ] Alphanumeric position handling 
+- [x] Alphanumeric position handling 
 - [ ] JSONB support
 
 # Testing 
-Run the docker-compose from the project root:
+If you're running the integration tests, you'll need a Postgres cluster with 
+replication running. You can use our docker-compose file that works with the 
+default test settings by running
+
 ```bash
 docker-compose -f ./test/docker-compose-postgres.yml up
 ```
+Once that's running, you can run all integration tests:
 
-Run all connector tests:
 ```bash
-go test -race ./pkg/plugins/pg/...
+go test -race -v -timeout 10s --tags=integration ./pkg/plugins/pg/...
+```
+
+Run all connector unit tests:
+```bash
+go test -race -v -timeout 10s ./pkg/plugins/pg/...
 ```
 
 # References 
