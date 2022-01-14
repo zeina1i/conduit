@@ -163,7 +163,6 @@ func (s *Source) Read(ctx context.Context, _ record.Position) (record.Record, er
 		}
 		return s.snapshotter.Next()
 	}
-
 	// check cdc buffer
 	if s.cdc != nil {
 		if s.cdc.HasNext() {
@@ -172,7 +171,8 @@ func (s *Source) Read(ctx context.Context, _ record.Position) (record.Record, er
 		}
 	}
 	// TODO: implement long polling reader here
-	// no buffer present, return err end data.
+	// TODO: This should be a switch statement that checks the existence of
+	// iterators and responds accordingly. That would be far cleaner here.
 	return record.Record{}, plugins.ErrEndData
 }
 
