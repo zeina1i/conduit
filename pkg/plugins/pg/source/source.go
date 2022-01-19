@@ -39,7 +39,12 @@ var (
 	// ErrInvalidURL is returned when the DB can't be connected to with the
 	// provided URL
 	ErrInvalidURL = cerrors.New("incorrect url")
+	// ErrEmptyConfig is returned when no config is provided
+	ErrEmptyConfig = cerrors.Errorf("must provide a plugin config")
 )
+
+// required is a set of our plugin defaults for the purposes of validation
+var required = []string{"url", "table"}
 
 // Source holds a connection to the database.
 type Source struct {
@@ -91,14 +96,10 @@ func (s *Source) Open(ctx context.Context, cfg plugins.Config) error {
 	if err != nil {
 		return cerrors.Errorf("failed to set columns: %w", err)
 	}
-	// if cdc is set, turn on CDC subscription
-	if v, ok := cfg.Settings["cdc"]; ok && v == "true" {
-		err = s.withCDC(ctx, cfg)
-		if err != nil {
-			return cerrors.Errorf("failed to set reader: %w", err)
-		}
+	err = s.withCDC(ctx, cfg)
+	if err != nil {
+		return cerrors.Errorf("failed to set reader: %w", err)
 	}
-	// set snapshot behavior
 	err = s.withSnapshot(ctx, cfg)
 	if err != nil {
 		return cerrors.Errorf("failed to set snapshot: %w", err)
@@ -114,6 +115,9 @@ func (s *Source) Teardown() error {
 		log.Printf("tearing down snapshotter")
 		teardownErr = s.snapshotter.Teardown()
 	}
+	if s.killswitch != nil {
+		s.killswitch()
+	}
 	// wait for PG subscription and DB to close and return any errors.
 	s.subWG.Wait()
 	// check that db exists before trying to close it.
@@ -121,20 +125,21 @@ func (s *Source) Teardown() error {
 		log.Printf("closing postgres connection")
 		dbErr = s.db.Close()
 	}
-	if s.killswitch != nil {
-		s.killswitch()
-	}
 	return multierror.Append(dbErr, s.subErr, teardownErr)
 }
 
-// Validate opens up a connection to the DB to see if it was successful and then
-// calls Teardown to drop the DB connection and clean up.
+// Validate checks for the existence of all required keys in a config and
+// returns an error if any of them are missing.
 func (s *Source) Validate(cfg plugins.Config) error {
-	err := s.Open(context.Background(), cfg)
-	if err != nil {
-		return cerrors.Errorf("invalid config: %w", err)
+	if cfg.Settings == nil {
+		return ErrEmptyConfig
 	}
-	return s.Teardown()
+	for _, k := range required {
+		if _, ok := cfg.Settings[k]; !ok {
+			return cerrors.Errorf("plugin config missing required field %s", k)
+		}
+	}
+	return nil
 }
 
 // Read takes a context and a Position and returns a Record or an error.

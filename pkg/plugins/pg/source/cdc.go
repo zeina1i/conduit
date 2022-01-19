@@ -33,6 +33,16 @@ var bufferSize = 1000
 // withCDC sets up change data capture for the Postgres Source or returns an
 // error.
 func (s *Source) withCDC(ctx context.Context, cfg plugins.Config) error {
+	// early return if cdc is disabled
+	v, ok := cfg.Settings["cdc"]
+	// if cdc is set, check the value for falsy values.
+	if ok {
+		switch v {
+		case "disabled", "false", "off", "0":
+			log.Println("cdc behavior turned off")
+			return nil
+		}
+	}
 	// setup a WaitGroup to track our Postgres subscription's goroutine
 	s.subWG = sync.WaitGroup{}
 	// uri is the string used to connect the CDC subscription to Postgres

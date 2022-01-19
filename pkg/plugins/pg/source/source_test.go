@@ -175,8 +175,6 @@ func TestSource_Read(t *testing.T) {
 			}
 			// NB: pass nil because Position is not used for this connector
 			got, err := s.Read(context.Background(), nil)
-			t.Logf("got: %v", got)
-			t.Logf("err: %v", err)
 			if (err != nil) != tt.wantErr {
 				assert.True(t, cerrors.Is(err, tt.err), "failed to get correct error")
 				t.Errorf("Source.Read() error = %v, wantErr %v", err, tt.wantErr)
@@ -187,6 +185,58 @@ func TestSource_Read(t *testing.T) {
 			if diff != "" {
 				t.Logf("[DIFF]: %s", diff)
 				t.Errorf("Source.Read() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestSource_Validate(t *testing.T) {
+	type args struct {
+		cfg plugins.Config
+	}
+	tests := []struct {
+		name    string
+		args    args
+		wantErr bool
+	}{
+		{
+			name: "should pass validation",
+			args: args{
+				cfg: plugins.Config{
+					Settings: map[string]string{
+						"url":   "postgres://test:user@localhost/db",
+						"table": "foo",
+					},
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "should fail validation",
+			args: args{
+				cfg: plugins.Config{
+					Settings: map[string]string{
+						"table": "bar",
+					},
+				},
+			},
+			wantErr: true,
+		},
+		{
+			name: "should fail on empty settings",
+			args: args{
+				cfg: plugins.Config{
+					Settings: map[string]string{},
+				},
+			},
+			wantErr: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := &Source{}
+			if err := s.Validate(tt.args.cfg); (err != nil) != tt.wantErr {
+				t.Errorf("Source.Validate() error = %v, wantErr %v", err, tt.wantErr)
 			}
 		})
 	}

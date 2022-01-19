@@ -22,6 +22,7 @@ import (
 	"testing"
 
 	"github.com/conduitio/conduit/pkg/foundation/assert"
+	"github.com/conduitio/conduit/pkg/foundation/cerrors"
 	"github.com/conduitio/conduit/pkg/plugins"
 
 	_ "github.com/lib/pq"
@@ -64,6 +65,7 @@ func TestSource_Open(t *testing.T) {
 						"table":    "records",
 						"url":      DBURL,
 						"snapshot": "disabled",
+						"cdc":      "disabled",
 					},
 				},
 			},
@@ -78,6 +80,7 @@ func TestSource_Open(t *testing.T) {
 					Settings: map[string]string{
 						"table":    "records",
 						"snapshot": "disabled",
+						"cdc":      "disabled",
 					},
 				},
 			},
@@ -94,13 +97,14 @@ func TestSource_Open(t *testing.T) {
 						"columns":  "key,column1,column2,column3",
 						"url":      DBURL,
 						"snapshot": "disabled",
+						"cdc":      "disabled",
 					},
 				},
 			},
 			wantErr: false,
 		},
 		{
-			name:   "should configure plugin to key from primary key column by default",
+			name:   "should set key to table primary key by default",
 			fields: fields{},
 			args: args{
 				ctx: context.Background(),
@@ -109,6 +113,7 @@ func TestSource_Open(t *testing.T) {
 						"table":    "records",
 						"url":      DBURL,
 						"snapshot": "disabled",
+						"cdc":      "disabled",
 					},
 				},
 			},
@@ -124,23 +129,7 @@ func TestSource_Open(t *testing.T) {
 						"table":    "records",
 						"url":      DBURL,
 						"key":      "key",
-						"snapshot": "disabled",
-					},
-				},
-			},
-			wantErr: false,
-		},
-		{
-			name:   "should handle active mode being set from config",
-			fields: fields{},
-			args: args{
-				ctx: context.Background(),
-				cfg: plugins.Config{
-					Settings: map[string]string{
-						"table":    "records",
-						"url":      DBURL,
-						"key":      "key",
-						"mode":     "active",
+						"cdc":      "disabled",
 						"snapshot": "disabled",
 					},
 				},
@@ -164,22 +153,45 @@ func TestSource_Open(t *testing.T) {
 	}
 }
 
+func TestValidateDisabledSettings(t *testing.T) {
+	_ = getTestPostgres(t)
+	s := &Source{}
+	cfg := plugins.Config{
+		Settings: map[string]string{
+			"table":    "records",
+			"url":      DBURL,
+			"snapshot": "disabled",
+			"cdc":      "disabled",
+		},
+	}
+	err := s.Validate(cfg)
+	assert.Ok(t, err)
+	err = s.Open(context.Background(), cfg)
+	assert.Ok(t, err)
+	assert.Equal(t, nil, s.snapshotter)
+	assert.Equal(t, nil, s.cdc)
+	err = s.Teardown()
+	assert.Ok(t, err)
+}
+
 func TestOpen_Defaults(t *testing.T) {
 	_ = getTestPostgres(t)
 	s := &Source{}
 	err := s.Open(context.Background(), plugins.Config{
 		Settings: map[string]string{
-			"table":    "records",
-			"url":      DBURL,
-			"snapshot": "disabled",
+			"table": "records",
+			"url":   RepDBURL,
 		},
 	})
 	assert.Ok(t, err)
-	// assert that we are keying by id by default
 	assert.Equal(t, s.key, "id")
-	// assert that we are collecting all columns by default
-	assert.Equal(t, []string{"id", "key", "column1", "column2", "column3"}, s.columns)
-	assert.Ok(t, s.Teardown())
+	assert.Equal(t, []string{"id", "key", "column1", "column2", "column3"},
+		s.columns)
+	assert.True(t, s.snapshotter != nil, "failed to set snapshotter default")
+	assert.True(t, s.cdc != nil, "failed to set cdc default")
+	err = s.Teardown()
+	assert.True(t, cerrors.Is(err, ErrSnapshotInterrupt),
+		"failed to get snapshot interrupt")
 }
 
 // getTestPostgres is a testing helper that fails if it can't setup a Postgres

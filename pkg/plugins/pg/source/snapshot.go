@@ -17,9 +17,11 @@ package source
 import (
 	"context"
 	"database/sql"
+	"log"
 
 	"github.com/conduitio/conduit/pkg/foundation/cerrors"
 	"github.com/conduitio/conduit/pkg/foundation/multierror"
+	"github.com/conduitio/conduit/pkg/plugins"
 	"github.com/conduitio/conduit/pkg/record"
 )
 
@@ -200,6 +202,26 @@ func (s *Snapshotter) loadRows(ctx context.Context, db *sql.DB) error {
 	return nil
 }
 
-func (s *Snapshotter) Push(record.Record) {
-	// NB: Push is a noop in the snapshotter case.
+// withSnapshot is on by default and sets up a Snapshotter that takes a
+// snapshot in a transaction lock of the database before the main plugin
+// operations begin.
+func (s *Source) withSnapshot(ctx context.Context, cfg plugins.Config) error {
+	v, ok := cfg.Settings["snapshot"]
+	if ok {
+		switch v {
+		case "disabled", "false", "off", "0":
+			log.Println("snapshot behavior turned off")
+			return nil
+		}
+	}
+	snap, err := NewSnapshotter(ctx, s.db, s.table, s.columns, s.key)
+	if err != nil {
+		return cerrors.Errorf("failed to set snapshotter: %w", err)
+	}
+	s.snapshotter = snap
+	log.Println("snapshotter created and ready to start")
+	return nil
 }
+
+// Push is a noop in the snapshotter case
+func (s *Snapshotter) Push(record.Record) {}

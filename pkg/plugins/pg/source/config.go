@@ -15,7 +15,6 @@
 package source
 
 import (
-	"context"
 	"database/sql"
 	"log"
 	"strings"
@@ -118,21 +117,5 @@ func (s *Source) withColumns(cfg plugins.Config) error {
 	trimmed := strings.TrimSpace(columns)
 	s.columns = strings.Split(trimmed, ",")
 
-	return nil
-}
-
-// withSnapshot is on by default and sets up a Snapshotter that takes a
-// snapshot in a transaction lock of the database before the main plugin
-// operations begin.
-func (s *Source) withSnapshot(ctx context.Context, cfg plugins.Config) error {
-	if v, ok := cfg.Settings["snapshot"]; ok && v == "disabled" {
-		return nil
-	}
-	snap, err := NewSnapshotter(ctx, s.db, s.table, s.columns, s.key)
-	if err != nil {
-		return cerrors.Errorf("failed to set snapshotter: %w", err)
-	}
-	s.snapshotter = snap
-	log.Println("snapshotter created and ready to start.")
 	return nil
 }
