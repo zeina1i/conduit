@@ -21,6 +21,7 @@ import (
 	"fmt"
 
 	"github.com/conduitio/conduit/pkg/foundation/cerrors"
+	"github.com/google/uuid"
 	"github.com/segmentio/kafka-go"
 )
 
@@ -31,7 +32,9 @@ type Consumer interface {
 	// A nil message, the client's position in Kafka, and a nil error,
 	// if no message was retrieved within the specified timeout, OR
 	// A nil message, nil position and an error if there was an error while retrieving the message (e.g. broker down).
-	Get() (*kafka.Message, map[int]int64, error)
+	Get() (*kafka.Message, string, error)
+
+	Ack() error
 
 	// Close this consumer and the associated resources (e.g. connections to the broker)
 	Close()
@@ -45,20 +48,10 @@ type Consumer interface {
 }
 
 type segmentConsumer struct {
-	brokers []string
-	topic   string
-
 	// maps partition IDs to respective readers
 	// segmentio/kafka-go requires a reader per partition
-	readers map[int]*kafka.Reader
-	// used for getting topic-level information
-	client *kafka.Client
-	// maps partition IDs to this consumer's position (offset) with the respective partition
-	positions map[int]int64
-	// a channel where all partition readers push messages to
-	msgs chan kafka.Message
-	// a channel where all partition readers push errors to
-	errors chan error
+	reader      *kafka.Reader
+	lastMsgRead *kafka.Message
 }
 
 // NewConsumer creates a new Kafka consumer.
@@ -71,98 +64,60 @@ func NewConsumer(config Config) (Consumer, error) {
 	if config.Topic == "" {
 		return nil, ErrTopicMissing
 	}
-	c := &kafka.Client{Addr: kafka.TCP(config.Servers...)}
 
-	consumer := &segmentConsumer{
-		brokers:   config.Servers,
-		topic:     config.Topic,
-		readers:   make(map[int]*kafka.Reader),
-		client:    c,
-		positions: map[int]int64{},
-		msgs:      make(chan kafka.Message),
-		errors:    make(chan error),
-	}
-	err := consumer.refreshReaders()
-	if err != nil {
-		return nil, cerrors.Errorf("couldn't refresh readers: %w", err)
-	}
-	return consumer, nil
+	return &segmentConsumer{
+		reader:    newReader(config),
+	}, nil
 }
 
-func (c *segmentConsumer) Get() (*kafka.Message, map[int]int64, error) {
-	for {
-		select {
-		case msg := <-c.msgs:
-			// todo consider getting offsets from the readers.
-			// while that would eliminate the need for a field (segmentConsumer.positions)
-			// it would add an overhead to each messages being read
-			// (iterate over all readers)
-			return &msg, c.updatePosition(&msg), nil
-		case err := <-c.errors:
-			return nil, nil, cerrors.Errorf("couldn't read message: %w", err)
-		}
+func newReader(c Config) *kafka.Reader {
+	// todo add note about new partitions
+	var startOffset int64
+	if c.ReadFromBeginning {
+		startOffset = kafka.FirstOffset
+	} else {
+		startOffset = kafka.LastOffset
 	}
+	return kafka.NewReader(kafka.ReaderConfig{
+		Brokers:     c.Servers,
+		Topic:       c.Topic,
+		StartOffset: startOffset,
+		GroupID: uuid.NewString(),
+	})
+}
+
+func (c *segmentConsumer) Get() (*kafka.Message, string, error) {
+	msg, err := c.reader.ReadMessage(context.Background())
+	if err != nil {
+		return nil, "", cerrors.Errorf("couldn't read message: %w", err)
+	}
+	c.lastMsgRead = &msg
+	return &msg, c.readerID(), nil
+}
+
+func (c *segmentConsumer) Ack() error {
+	err := c.reader.CommitMessages(context.Background(), *c.lastMsgRead)
+	if err != nil {
+		return cerrors.Errorf("could't commit messages: %w", err)
+	}
+	return nil
 }
 
 func (c *segmentConsumer) StartFrom(topic string, position map[int]int64, readFromBeginning bool) error {
 	return nil
 }
 
-func (c *segmentConsumer) updatePosition(msg *kafka.Message) map[int]int64 {
-	if msg == nil {
-		return c.positions
-	}
-	c.positions[msg.Partition] = msg.Offset + 1
-	return c.positions
-}
-
 func (c *segmentConsumer) Close() {
-	if len(c.readers) == 0 {
+	if c.reader == nil {
 		return
 	}
 	// this will also make the loops in the reader goroutines stop
-	for p, r := range c.readers {
-		err := r.Close()
-		if err != nil {
-			fmt.Printf("couldn't close reader for partition %v due to error: %v\n", p, err)
-		}
-	}
-}
-
-// refreshReaders is creating a kafka.Reader for each partition, for which no reader exists yet.
-// todo call it periodically, since partitions can be added to a topic
-func (c *segmentConsumer) refreshReaders() error {
-	req := &kafka.MetadataRequest{Topics: []string{c.topic}}
-	metadata, err := c.client.Metadata(context.Background(), req)
+	err := c.reader.Close()
 	if err != nil {
-		return cerrors.Errorf("couldn't fetch topic metadata: %w", err)
+		fmt.Printf("couldn't close reader: %v\n", err)
 	}
-	for _, partition := range metadata.Topics[0].Partitions {
-		// reader for this partition already exists
-		if _, ok := c.readers[partition.ID]; ok {
-			continue
-		}
-		// NB: NewReader will panic if the ReaderConfig is invalid.
-		reader := kafka.NewReader(kafka.ReaderConfig{
-			Brokers:   c.brokers,
-			Topic:     c.topic,
-			Partition: partition.ID,
-		})
-		c.start(reader)
-		c.readers[partition.ID] = reader
-	}
-	return nil
 }
 
-func (c *segmentConsumer) start(r *kafka.Reader) {
-	go func() {
-		for {
-			m, err := r.ReadMessage(context.Background())
-			if err != nil {
-				c.errors <- err
-				break
-			}
-			c.msgs <- m
-		}
-	}()
+func (c *segmentConsumer) readerID() string {
+	return c.reader.Config().GroupID
 }

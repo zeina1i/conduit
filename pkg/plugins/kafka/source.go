@@ -67,14 +67,14 @@ func (s *Source) Read(ctx context.Context, position record.Position) (record.Rec
 		return record.Record{}, cerrors.Errorf("couldn't start from position: %w", err)
 	}
 
-	message, positions, err := s.Consumer.Get()
+	message, kafkaPos, err := s.Consumer.Get()
 	if err != nil {
 		return record.Record{}, cerrors.Errorf("failed getting a message %w", err)
 	}
 	if message == nil {
 		return record.Record{}, plugins.ErrEndData
 	}
-	rec, err := toRecord(message, positions)
+	rec, err := toRecord(message, kafkaPos)
 	if err != nil {
 		return record.Record{}, cerrors.Errorf("couldn't transform record %w", err)
 	}
@@ -118,13 +118,9 @@ func toKafkaPosition(position record.Position) (map[int]int64, error) {
 	return p, nil
 }
 
-func toRecord(message *kafka.Message, position map[int]int64) (record.Record, error) {
-	posBytes, err := json.Marshal(position)
-	if err != nil {
-		return record.Record{}, cerrors.Errorf("couldn't serialize position %w", err)
-	}
+func toRecord(message *kafka.Message, position string) (record.Record, error) {
 	return record.Record{
-		Position:  posBytes,
+		Position:  []byte(position),
 		CreatedAt: time.Time{},
 		ReadAt:    time.Time{},
 		Key:       record.RawData{Raw: message.Key},
@@ -133,5 +129,5 @@ func toRecord(message *kafka.Message, position map[int]int64) (record.Record, er
 }
 
 func (s *Source) Ack(context.Context, record.Position) error {
-	return nil
+	return s.Consumer.Ack()
 }
