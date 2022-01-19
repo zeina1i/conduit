@@ -83,21 +83,12 @@ func (s *Source) Read(ctx context.Context, position record.Position) (record.Rec
 }
 
 func (s *Source) startFrom(position record.Position) error {
-	// The check is in place, to avoid instructing the Kafka client to "seek"
-	// to a position if it's already at it.
-	// The position is actually a map, but we compare the "raw" byte representations
-	// to avoid needless parsing.
-	// Note: Map key ordering is not guaranteed, however,
-	// json.Marshall() orders the keys itself, so using it in comparisons is safe.
+	// The check is in place, to avoid reconstructing the Kafka consumer.
 	if s.lastPositionRead != nil && bytes.Equal(s.lastPositionRead, position) {
 		return nil
 	}
-	positionMap, err := toKafkaPosition(position)
-	if err != nil {
-		return cerrors.Errorf("invalid position %v %w", string(position), err)
-	}
 
-	err = s.Consumer.StartFrom(s.Config.Topic, positionMap, s.Config.ReadFromBeginning)
+	err := s.Consumer.StartFrom(s.Config, string(position))
 	if err != nil {
 		return cerrors.Errorf("couldn't start from given position %v due to %w", string(position), err)
 	}

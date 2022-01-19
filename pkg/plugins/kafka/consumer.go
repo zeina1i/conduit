@@ -44,7 +44,8 @@ type Consumer interface {
 	// the reading behavior is specified by 'readFromBeginning' parameter:
 	// if 'true', then all messages will be read, if 'false', only new messages will be read.
 	// Returns: An error, if the consumer could not be set to read from the given position, nil otherwise.
-	StartFrom(topic string, position map[int]int64, readFromBeginning bool) error
+	// todo update comment
+	StartFrom(config Config, position string) error
 }
 
 type segmentConsumer struct {
@@ -55,35 +56,30 @@ type segmentConsumer struct {
 }
 
 // NewConsumer creates a new Kafka consumer.
+// todo cleanup
 func NewConsumer(config Config) (Consumer, error) {
-	// todo if we can assume that a new Config instance will always be created by calling Parse(),
-	// and that the instance will not be mutated, then we can leave it out these checks.
-	if len(config.Servers) == 0 {
-		return nil, ErrServersMissing
-	}
-	if config.Topic == "" {
-		return nil, ErrTopicMissing
-	}
-
-	return &segmentConsumer{
-		reader:    newReader(config),
-	}, nil
+	return &segmentConsumer{}, nil
 }
 
-func newReader(c Config) *kafka.Reader {
+func newReader(cfg Config, groupId string) *kafka.Reader {
 	// todo add note about new partitions
 	var startOffset int64
-	if c.ReadFromBeginning {
+	if cfg.ReadFromBeginning {
 		startOffset = kafka.FirstOffset
 	} else {
 		startOffset = kafka.LastOffset
 	}
-	return kafka.NewReader(kafka.ReaderConfig{
-		Brokers:     c.Servers,
-		Topic:       c.Topic,
+	readerCfg := kafka.ReaderConfig{
+		Brokers:     cfg.Servers,
+		Topic:       cfg.Topic,
 		StartOffset: startOffset,
-		GroupID: uuid.NewString(),
-	})
+	}
+	if groupId == "" {
+		readerCfg.GroupID = uuid.NewString()
+	} else {
+		readerCfg.GroupID = groupId
+	}
+	return kafka.NewReader(readerCfg)
 }
 
 func (c *segmentConsumer) Get() (*kafka.Message, string, error) {
@@ -103,7 +99,16 @@ func (c *segmentConsumer) Ack() error {
 	return nil
 }
 
-func (c *segmentConsumer) StartFrom(topic string, position map[int]int64, readFromBeginning bool) error {
+func (c *segmentConsumer) StartFrom(config Config, position string) error {
+	// todo if we can assume that a new Config instance will always be created by calling Parse(),
+	// and that the instance will not be mutated, then we can leave it out these checks.
+	if len(config.Servers) == 0 {
+		return ErrServersMissing
+	}
+	if config.Topic == "" {
+		return ErrTopicMissing
+	}
+	c.reader = newReader(config, position)
 	return nil
 }
 
