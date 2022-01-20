@@ -30,11 +30,11 @@ import (
 	skafka "github.com/segmentio/kafka-go"
 )
 
-func TestConfluentClient_StartFrom_FromBeginning(t *testing.T) {
+func TestConsumer_Get_FromBeginning(t *testing.T) {
 	t.Parallel()
 
 	cfg := kafka.Config{
-		Topic:             "TestConfluentClient_" + uuid.NewString(),
+		Topic:             "TestConsumer_Get_FromBeginning_" + uuid.NewString(),
 		Servers:           []string{"localhost:9092"},
 		ReadFromBeginning: true,
 	}
@@ -65,11 +65,11 @@ func TestConfluentClient_StartFrom_FromBeginning(t *testing.T) {
 	assert.Equal(t, 0, len(messagesUnseen))
 }
 
-func TestConfluentClient_Get_OnlyNew(t *testing.T) {
+func TestConsumer_Get_OnlyNew(t *testing.T) {
 	t.Parallel()
 
 	cfg := kafka.Config{
-		Topic:             "TestConfluentClient_" + uuid.NewString(),
+		Topic:             "TestConsumer_Get_OnlyNew_" + uuid.NewString(),
 		Servers:           []string{"localhost:9092"},
 		ReadFromBeginning: false,
 	}
