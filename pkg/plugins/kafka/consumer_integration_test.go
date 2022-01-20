@@ -38,130 +38,82 @@ func (s staticBalancer) Balance(msg kafka.Message, partitions ...int) int {
 func TestConfluentClient_StartFrom_EmptyPosition(t *testing.T) {
 	t.Parallel()
 
-	cfg := Config{Topic: "TestConfluentClient_" + uuid.NewString(), Servers: []string{"localhost:9092"}}
+	servers := []string{"localhost:9092"}
+	cfg := Config{Topic: "TestConfluentClient_" + uuid.NewString(), Servers: servers}
 	createTopic(t, cfg, 1)
 
 	consumer, err := NewConsumer(cfg)
 	assert.Ok(t, err)
 
-	err = consumer.StartFrom(cfg.Topic, map[int]int64{}, true)
-	defer consumer.Close()
-	assert.Ok(t, err)
-}
-
-func TestConfluentClient_StartFrom_FromBeginning(t *testing.T) {
-	t.Parallel()
-
-	cfg := Config{
-		Topic:             "TestConfluentClient_" + uuid.NewString(),
-		Servers:           []string{"localhost:9092"},
-		ReadFromBeginning: true,
-	}
-	// other two partitions should be consumed from beginning
-	positions := map[int]int64{0: 1}
-
-	partitions := 3
-	createTopic(t, cfg, partitions)
-
-	sendTestMessages(t, cfg, partitions)
-
-	consumer, err := NewConsumer(cfg)
+	groupId := uuid.NewString()
+	err = consumer.StartFrom(cfg, groupId)
 	defer consumer.Close()
 	assert.Ok(t, err)
 
-	err = consumer.StartFrom(cfg.Topic, positions, cfg.ReadFromBeginning)
-	assert.Ok(t, err)
-
-	// 1 message from first partition
-	// +4 messages from 2 partitions which need to be read fully
-	messagesUnseen := map[string]bool{
-		"test-key-1": true,
-		"test-key-2": true,
-		"test-key-4": true,
-		"test-key-5": true,
-		"test-key-6": true,
+	group, err := kafka.NewConsumerGroup(kafka.ConsumerGroupConfig{
+		ID:      groupId,
+		Brokers: servers,
+		Topics:  []string{cfg.Topic},
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
-	for i := 1; i <= 5; i++ {
-		message, _, err := consumer.Get()
-		assert.NotNil(t, message)
-		assert.Ok(t, err)
-		delete(messagesUnseen, string(message.Key))
+	gen, err := group.Next(context.Background())
+	if err != nil {
+		t.Fatal(err)
 	}
-	assert.Equal(t, 0, len(messagesUnseen))
-
-	message, updatedPos, err := consumer.Get()
-	assert.Ok(t, err)
-	assert.Nil(t, message)
-	assert.Equal(
-		t,
-		map[int]int64{0: 2, 1: 2, 2: 2},
-		updatedPos,
-	)
+	assert.Equal(t, 2, gen.ID)
 }
 
-func TestConfluentClient_StartFrom(t *testing.T) {
-	cases := []struct {
-		name      string
-		cfg       Config
-		positions map[int]int64
-	}{
-		{
-			name: "StartFrom: Only new",
-			cfg: Config{
-				Topic:             "TestConfluentClient_" + uuid.NewString(),
-				Servers:           []string{"localhost:9092"},
-				ReadFromBeginning: false,
-			},
-			positions: map[int]int64{0: 1},
-		},
-		{
-			name: "StartFrom: Simple test",
-			cfg: Config{
-				Topic:   "TestConfluentClient_" + uuid.NewString(),
-				Servers: []string{"localhost:9092"},
-			},
-			positions: map[int]int64{0: 1, 1: 2, 2: 2},
-		},
-	}
-
-	for _, tt := range cases {
-		// https://github.com/golang/go/wiki/CommonMistakes#using-goroutines-on-loop-iterator-variables
-		tt := tt
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			testConfluentClient_StartFrom(t, tt.cfg, tt.positions)
-		})
-	}
-}
-
-func testConfluentClient_StartFrom(t *testing.T, cfg Config, positions map[int]int64) {
-	partitions := 3
-	createTopic(t, cfg, partitions)
-
-	sendTestMessages(t, cfg, partitions)
-
-	consumer, err := NewConsumer(cfg)
-	defer consumer.Close()
-	assert.Ok(t, err)
-
-	err = consumer.StartFrom(cfg.Topic, positions, cfg.ReadFromBeginning)
-	assert.Ok(t, err)
-
-	message, _, err := consumer.Get()
-	assert.NotNil(t, message)
-	assert.Ok(t, err)
-	assert.Equal(t, "test-key-6", string(message.Key))
-	assert.Equal(t, "test-payload-6", string(message.Value))
-
-	message, updatedPos, err := consumer.Get()
-	assert.Ok(t, err)
-	assert.Nil(t, message)
-	assert.Equal(
-		t,
-		map[int]int64{0: 2, 1: 2, 2: 2},
-		updatedPos,
-	)
-}
+//func TestConfluentClient_StartFrom_FromBeginning(t *testing.T) {
+//	t.Parallel()
+//
+//	cfg := Config{
+//		Topic:             "TestConfluentClient_" + uuid.NewString(),
+//		Servers:           []string{"localhost:9092"},
+//		ReadFromBeginning: true,
+//	}
+//	// other two partitions should be consumed from beginning
+//	positions := map[int]int64{0: 1}
+//
+//	partitions := 3
+//	createTopic(t, cfg, partitions)
+//
+//	sendTestMessages(t, cfg, partitions)
+//
+//	consumer, err := NewConsumer(cfg)
+//	defer consumer.Close()
+//	assert.Ok(t, err)
+//
+//	err = consumer.StartFrom(cfg.Topic, positions, cfg.ReadFromBeginning)
+//	assert.Ok(t, err)
+//
+//	// 1 message from first partition
+//	// +4 messages from 2 partitions which need to be read fully
+//	messagesUnseen := map[string]bool{
+//		"test-key-1": true,
+//		"test-key-2": true,
+//		"test-key-4": true,
+//		"test-key-5": true,
+//		"test-key-6": true,
+//	}
+//	for i := 1; i <= 5; i++ {
+//		message, _, err := consumer.Get()
+//		assert.NotNil(t, message)
+//		assert.Ok(t, err)
+//		delete(messagesUnseen, string(message.Key))
+//	}
+//	assert.Equal(t, 0, len(messagesUnseen))
+//
+//	message, updatedPos, err := consumer.Get()
+//	assert.Ok(t, err)
+//	assert.Nil(t, message)
+//	assert.Equal(
+//		t,
+//		map[int]int64{0: 2, 1: 2, 2: 2},
+//		updatedPos,
+//	)
+//}
 
 // partition 0 has messages: 3 and 6
 // partition 1 has messages: 1 and 4
