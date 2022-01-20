@@ -31,7 +31,6 @@ import (
 
 func TestSource_Read(t *testing.T) {
 	type fields struct {
-		killswitch  context.CancelFunc
 		db          *sql.DB
 		table       string
 		columns     []string
@@ -165,7 +164,6 @@ func TestSource_Read(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			s := &Source{
-				killswitch:  tt.fields.killswitch,
 				db:          tt.fields.db,
 				table:       tt.fields.table,
 				columns:     tt.fields.columns,

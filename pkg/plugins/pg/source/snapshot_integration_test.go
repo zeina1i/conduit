@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//go:build integration
+// //go:build integration
 
 package source
 
@@ -22,13 +22,13 @@ import (
 
 	"github.com/conduitio/conduit/pkg/foundation/assert"
 	"github.com/conduitio/conduit/pkg/foundation/cerrors"
+	"github.com/conduitio/conduit/pkg/plugins"
 	"github.com/conduitio/conduit/pkg/record"
 )
 
 func TestSnapshotterReads(t *testing.T) {
-	ctx := context.Background()
 	db := getTestPostgres(t)
-	s, err := NewSnapshotter(ctx, db, "records", []string{"id",
+	s, err := NewSnapshotter(db, "records", []string{"id",
 		"column1", "key"}, "key")
 	assert.Ok(t, err)
 	i := 0
@@ -47,9 +47,8 @@ func TestSnapshotterReads(t *testing.T) {
 }
 
 func TestSnapshotterTeardown(t *testing.T) {
-	ctx := context.Background()
 	db := getTestPostgres(t)
-	s, err := NewSnapshotter(ctx, db, "records", []string{"id",
+	s, err := NewSnapshotter(db, "records", []string{"id",
 		"column1", "key"}, "key")
 	assert.Ok(t, err)
 	assert.True(t, s.HasNext(), "failed to queue up record")
@@ -63,9 +62,8 @@ func TestSnapshotterTeardown(t *testing.T) {
 }
 
 func TestPrematureDBClose(t *testing.T) {
-	ctx := context.Background()
 	db := getTestPostgres(t)
-	s, err := NewSnapshotter(ctx, db, "records", []string{"id",
+	s, err := NewSnapshotter(db, "records", []string{"id",
 		"column1", "key"}, "key")
 	assert.Ok(t, err)
 	// assert that we have at least one row and it's loading as expected
@@ -88,4 +86,29 @@ func TestPrematureDBClose(t *testing.T) {
 	assert.Equal(t, rec, record.Record{})
 	assert.True(t, cerrors.Is(err, ErrNoRows),
 		"failed to get snapshot incomplete")
+}
+
+func TestCDCIterator(t *testing.T) {
+	s := Source{}
+	err := s.Open(context.Background(), plugins.Config{
+		Settings: map[string]string{
+			"table": "records",
+			"url":   RepDBURL,
+			// disable snapshot mode since it's not being tested
+			"snapshot": "disabled",
+		},
+	})
+	assert.Ok(t, err)
+	t.Cleanup(func() { s.Teardown() })
+	rec, err := s.Read(context.Background(), nil)
+	assert.Equal(t, rec, record.Record{})
+	assert.True(t, cerrors.Is(err, plugins.ErrEndData),
+		"failed to get errenddata")
+	// insert events now that cdc mode is setup
+	_, err = s.db.Query(`insert into records(column1, column2, column3) 
+	values ('biz', 666, false);`)
+	assert.Ok(t, err)
+	rec, err = s.cdc.Next()
+	assert.Ok(t, err)
+	assert.NotNil(t, rec)
 }
