@@ -38,7 +38,7 @@ func TestConfluentClient_StartFrom_FromBeginning(t *testing.T) {
 		Servers:           []string{"localhost:9092"},
 		ReadFromBeginning: true,
 	}
-	createTopic(t, cfg)
+	createTopic(t, cfg.Topic)
 	sendTestMessages(t, cfg, 1, 6)
 
 	consumer, err := kafka.NewConsumer(cfg)
@@ -73,7 +73,7 @@ func TestConfluentClient_Get_OnlyNew(t *testing.T) {
 		Servers:           []string{"localhost:9092"},
 		ReadFromBeginning: false,
 	}
-	createTopic(t, cfg)
+	createTopic(t, cfg.Topic)
 	sendTestMessages(t, cfg, 1, 6)
 
 	consumer, err := kafka.NewConsumer(cfg)
@@ -151,12 +151,12 @@ func TestGet_KafkaDown(t *testing.T) {
 	assert.Equal(t, "tcp", cause.Net)
 }
 
-func createTopic(t *testing.T, cfg kafka.Config) {
-	c, err := skafka.Dial("tcp", cfg.Servers[0])
+func createTopic(t *testing.T, topic string) {
+	c, err := skafka.Dial("tcp", "localhost:9092")
 	assert.Ok(t, err)
 	defer c.Close()
 
-	kt := skafka.TopicConfig{Topic: cfg.Topic, NumPartitions: 3, ReplicationFactor: 1}
+	kt := skafka.TopicConfig{Topic: topic, NumPartitions: 3, ReplicationFactor: 1}
 	err = c.CreateTopics(kt)
 	assert.Ok(t, err)
 }
