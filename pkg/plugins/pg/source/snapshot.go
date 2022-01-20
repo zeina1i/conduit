@@ -137,6 +137,11 @@ func (s *Snapshotter) Next() (record.Record, error) {
 // stop any unhandled contexts that we've received.
 func (s *Snapshotter) Teardown() error {
 	log.Printf("snapshotter attempting graceful teardown")
+	// throw interrupt error if we're not finished with snapshot
+	var interruptErr error
+	if !s.snapshotComplete {
+		interruptErr = ErrSnapshotInterrupt
+	}
 	closeErr := s.rows.Close()
 	if closeErr != nil {
 		return cerrors.Errorf("failed to close rows: %w", closeErr)
@@ -146,12 +151,6 @@ func (s *Snapshotter) Teardown() error {
 		if rowsErr != context.Canceled {
 			return cerrors.Errorf("rows error: %w", rowsErr)
 		}
-	}
-
-	// throw interrupt error if we're not finished with snapshot
-	var interruptErr error
-	if !s.snapshotComplete {
-		interruptErr = ErrSnapshotInterrupt
 	}
 	return interruptErr
 }

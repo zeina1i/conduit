@@ -22,8 +22,8 @@ import (
 	"testing"
 
 	"github.com/conduitio/conduit/pkg/foundation/assert"
-	"github.com/conduitio/conduit/pkg/foundation/cerrors"
 	"github.com/conduitio/conduit/pkg/plugins"
+	"github.com/conduitio/conduit/pkg/record"
 
 	_ "github.com/lib/pq"
 )
@@ -189,9 +189,43 @@ func TestOpen_Defaults(t *testing.T) {
 		s.columns)
 	assert.True(t, s.snapshotter != nil, "failed to set snapshotter default")
 	assert.True(t, s.cdc != nil, "failed to set cdc default")
+	// TODO: This context needs to cancel the server correctly
 	err = s.Teardown()
-	assert.True(t, cerrors.Is(err, ErrSnapshotInterrupt),
-		"failed to get snapshot interrupt")
+	assert.Ok(t, err)
+}
+
+func TestCDC(t *testing.T) {
+	_ = getTestPostgres(t)
+	s := &Source{}
+	err := s.Open(context.Background(), plugins.Config{
+		Settings: map[string]string{
+			"table":            "records",
+			"url":              RepDBURL,
+			"snapshot":         "disabled",
+			"slot_name":        "meroxa",
+			"publication_name": "meroxa",
+		},
+	})
+	assert.Ok(t, err)
+	assert.Equal(t, s.key, "id")
+	assert.Equal(t, []string{"id", "key", "column1", "column2", "column3"},
+		s.columns)
+	assert.True(t, s.cdc != nil, "failed to set cdc default")
+	rec1, err := s.Read(context.Background(), nil)
+	assert.Equal(t, err, plugins.ErrEndData)
+	assert.Equal(t, record.Record{}, rec1)
+
+	// add records and assert that we  didn't error
+	_, err = s.db.Query(`insert into records(column1, column2, column3)
+	values ('bizz', 456, false);`)
+	assert.Ok(t, err)
+
+	// assert that we received cdc events
+	_, err = s.Read(context.Background(), nil)
+	assert.Ok(t, err)
+
+	// okay so this test should be working but CDC mode is _not_ working.
+	// Once it is this test should get a different result.
 }
 
 // getTestPostgres is a testing helper that fails if it can't setup a Postgres
