@@ -25,13 +25,13 @@ import (
 	"github.com/segmentio/kafka-go"
 )
 
+// Consumer represents a Kafka consumer in a simplified form,
+// with just the functionality which is needed for this plugin.
+// A Consumer's offset is being managed by the broker.
 type Consumer interface {
-	// Get returns a message from the configured topic, waiting at most 'timeoutMs' milliseconds.
-	// Returns:
-	// A message and the client's 'position' in Kafka, if there's no error, OR
-	// A nil message, the client's position in Kafka, and a nil error,
-	// if no message was retrieved within the specified timeout, OR
-	// A nil message, nil position and an error if there was an error while retrieving the message (e.g. broker down).
+	// Get returns a message from the configured topic. Waits until a messages is available
+	// or until it errors out.
+	// Returns: a message (if available), the consumer group ID and an error (if there was one).
 	Get() (*kafka.Message, string, error)
 
 	Ack() error
@@ -39,13 +39,11 @@ type Consumer interface {
 	// Close this consumer and the associated resources (e.g. connections to the broker)
 	Close()
 
-	// StartFrom reads messages from the given topic, starting from the given positions.
-	// For new partitions or partitions not found in the 'position',
-	// the reading behavior is specified by 'readFromBeginning' parameter:
-	// if 'true', then all messages will be read, if 'false', only new messages will be read.
+	// StartFrom instructs the consumer to connect to a broker and a topic, using the provided consumer group ID.
+	// The group ID is significant for this consumer offsets.
+	// By using the same group ID after a restart, we make sure that the consumer continues from where it left off.
 	// Returns: An error, if the consumer could not be set to read from the given position, nil otherwise.
-	// todo update comment
-	StartFrom(config Config, position string) error
+	StartFrom(config Config, groupId string) error
 }
 
 type segmentConsumer struct {
@@ -55,14 +53,13 @@ type segmentConsumer struct {
 	lastMsgRead *kafka.Message
 }
 
-// NewConsumer creates a new Kafka consumer.
-// todo cleanup
-func NewConsumer(config Config) (Consumer, error) {
+// NewConsumer creates a new Kafka consumer. The consumer needs to be started
+// (using the StartFrom method) before actually being used.
+func NewConsumer(Config) (Consumer, error) {
 	return &segmentConsumer{}, nil
 }
 
 func newReader(cfg Config, groupId string) *kafka.Reader {
-	// todo add note about new partitions
 	var startOffset int64
 	if cfg.ReadFromBeginning {
 		startOffset = kafka.FirstOffset
@@ -70,9 +67,10 @@ func newReader(cfg Config, groupId string) *kafka.Reader {
 		startOffset = kafka.LastOffset
 	}
 	readerCfg := kafka.ReaderConfig{
-		Brokers:     cfg.Servers,
-		Topic:       cfg.Topic,
-		StartOffset: startOffset,
+		Brokers:               cfg.Servers,
+		Topic:                 cfg.Topic,
+		StartOffset:           startOffset,
+		WatchPartitionChanges: true,
 	}
 	if groupId == "" {
 		readerCfg.GroupID = uuid.NewString()
@@ -99,7 +97,7 @@ func (c *segmentConsumer) Ack() error {
 	return nil
 }
 
-func (c *segmentConsumer) StartFrom(config Config, position string) error {
+func (c *segmentConsumer) StartFrom(config Config, groupId string) error {
 	// todo if we can assume that a new Config instance will always be created by calling Parse(),
 	// and that the instance will not be mutated, then we can leave it out these checks.
 	if len(config.Servers) == 0 {
@@ -108,7 +106,7 @@ func (c *segmentConsumer) StartFrom(config Config, position string) error {
 	if config.Topic == "" {
 		return ErrTopicMissing
 	}
-	c.reader = newReader(config, position)
+	c.reader = newReader(config, groupId)
 	return nil
 }
 
