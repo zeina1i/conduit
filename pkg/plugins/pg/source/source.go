@@ -50,8 +50,6 @@ var required = []string{"url", "table"}
 type Source struct {
 	// subWG holds a WaitGroup used for Postgres subscription orchestration
 	subWG sync.WaitGroup
-	// killswitch is a context CancelFunc that gets hit at Teardown
-	killswitch context.CancelFunc
 	// inherit from Mutex so we can gain locks on our Source.
 	sync.Mutex
 	// holds a reference to our base Postgres database for Read queries.
@@ -71,12 +69,13 @@ type Source struct {
 	cdc Iterator
 	// snapshotter takes an Iterator of a snapshot of the database
 	snapshotter Iterator
+	// killswitch ...
+	killswitch context.CancelFunc
 }
 
 // Open attempts to open a database connection to Postgres. We use the `with`
 // pattern here to mutate the Source struct at each point.
 func (s *Source) Open(ctx context.Context, cfg plugins.Config) error {
-	ctx, s.killswitch = context.WithCancel(ctx)
 	err := s.withTable(cfg)
 	if err != nil {
 		return cerrors.Errorf("failed to set table: %w", err)
@@ -96,11 +95,11 @@ func (s *Source) Open(ctx context.Context, cfg plugins.Config) error {
 	if err != nil {
 		return cerrors.Errorf("failed to set columns: %w", err)
 	}
-	err = s.withCDC(ctx, cfg)
+	err = s.withCDC(cfg)
 	if err != nil {
 		return cerrors.Errorf("failed to set reader: %w", err)
 	}
-	err = s.withSnapshot(ctx, cfg)
+	err = s.withSnapshot(cfg)
 	if err != nil {
 		return cerrors.Errorf("failed to set snapshot: %w", err)
 	}
@@ -110,6 +109,7 @@ func (s *Source) Open(ctx context.Context, cfg plugins.Config) error {
 // Teardown hits the killswitch and waits for the database connection and CDC
 // subscriptions to close.
 func (s *Source) Teardown() error {
+	log.Printf("attempting graceful shutdown...")
 	var teardownErr, dbErr error
 	if s.snapshotter != nil {
 		log.Printf("tearing down snapshotter")
@@ -173,6 +173,7 @@ func (s *Source) Read(ctx context.Context, _ record.Position) (record.Record, er
 	if s.cdc != nil {
 		if s.cdc.HasNext() {
 			next, err := s.cdc.Next()
+			log.Printf("CDC RECORD %v - error: %v", next, err)
 			return next, err
 		}
 	}

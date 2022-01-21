@@ -32,7 +32,10 @@ var bufferSize = 1000
 
 // withCDC sets up change data capture for the Postgres Source or returns an
 // error.
-func (s *Source) withCDC(ctx context.Context, cfg plugins.Config) error {
+func (s *Source) withCDC(cfg plugins.Config) error {
+	c := context.Background()
+	ctx, cancel := context.WithCancel(c)
+	s.killswitch = cancel
 	// early return if cdc is disabled
 	v, ok := cfg.Settings["cdc"]
 	// if cdc is set, check the value for falsy values.
@@ -144,6 +147,8 @@ func (s *Source) withCDC(ctx context.Context, cfg plugins.Config) error {
 	go func() {
 		defer func() {
 			s.sub = nil
+			log.Printf("cleaning up replication subscription")
+			cancel()
 			s.subWG.Done()
 		}()
 		log.Printf("starting up subscription for %s", slotName)
@@ -153,6 +158,7 @@ func (s *Source) withCDC(ctx context.Context, cfg plugins.Config) error {
 			if err == context.Canceled {
 				// if the error is a context cancellation, don't assign the
 				// error because we consider this correct handling.
+				log.Println("context cancellation detected - returning")
 				return
 			}
 			s.subErr = cerrors.Errorf("postgres subscription produced an error: %w", err)

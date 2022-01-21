@@ -20,7 +20,6 @@ import (
 	"log"
 
 	"github.com/conduitio/conduit/pkg/foundation/cerrors"
-	"github.com/conduitio/conduit/pkg/foundation/multierror"
 	"github.com/conduitio/conduit/pkg/plugins"
 	"github.com/conduitio/conduit/pkg/record"
 )
@@ -55,10 +54,6 @@ type Snapshotter struct {
 	// snapshotComplete keeps an internal record of whether the snapshot is
 	// complete yet
 	snapshotComplete bool
-	// cancel is used to kill the snapshot's context
-	cancel context.CancelFunc
-	// tx holds the transaction that is opened to read the table.
-	tx *sql.Tx
 }
 
 // Snapshotter must fulfill Iterator
@@ -70,13 +65,12 @@ var _ Iterator = (*Snapshotter)(nil)
 // * It acquires a read only transaction lock before reading the table.
 // * If Teardown is called while a snpashot is in progress, it will return an
 // ErrSnapshotInterrupt error.
-func NewSnapshotter(ctx context.Context,
+func NewSnapshotter(
 	db *sql.DB,
 	table string,
 	columns []string,
 	key string,
 ) (*Snapshotter, error) {
-	ctx, cancel := context.WithCancel(ctx)
 	s := &Snapshotter{
 		db:               db,
 		table:            table,
@@ -84,10 +78,9 @@ func NewSnapshotter(ctx context.Context,
 		key:              key,
 		internalPos:      0,
 		snapshotComplete: false,
-		cancel:           cancel,
 	}
 	// load our initial set of rows into the snapshotter after we've set the db
-	err := s.loadRows(ctx, db)
+	err := s.loadRows(db)
 	if err != nil {
 		return nil, cerrors.Errorf("failed to get rows for snapshot: %w", err)
 	}
@@ -143,30 +136,22 @@ func (s *Snapshotter) Next() (record.Record, error) {
 // * Teardown handles all of its manual cleanup first then calls cancel to
 // stop any unhandled contexts that we've received.
 func (s *Snapshotter) Teardown() error {
+	log.Printf("snapshotter attempting graceful teardown")
+	// throw interrupt error if we're not finished with snapshot
+	var interruptErr error
+	if !s.snapshotComplete {
+		interruptErr = ErrSnapshotInterrupt
+	}
 	closeErr := s.rows.Close()
 	if closeErr != nil {
 		return cerrors.Errorf("failed to close rows: %w", closeErr)
 	}
 	rowsErr := s.rows.Err()
 	if rowsErr != nil {
-		return cerrors.Errorf("rows error: %w", rowsErr)
-	}
-
-	// throw interrupt error if we're not finished with snapshot
-	var interruptErr error
-	if !s.snapshotComplete {
-		interruptErr = ErrSnapshotInterrupt
-	}
-
-	// commit our snapshot's read transaction and rollback if it fails.
-	if commitErr := s.tx.Commit(); commitErr != nil {
-		rollbackErr := s.tx.Rollback()
-		if rollbackErr != nil {
-			return multierror.Append(rollbackErr, commitErr, interruptErr)
+		if rowsErr != context.Canceled {
+			return cerrors.Errorf("rows error: %w", rowsErr)
 		}
-		return multierror.Append(commitErr, interruptErr)
 	}
-	s.cancel()
 	return interruptErr
 }
 
@@ -178,34 +163,26 @@ func (s *Snapshotter) Teardown() error {
 // snapshot as completed.
 // * If a context cancellation is detected, it will rollback and return any
 // rows errors that were encountered.
-func (s *Snapshotter) loadRows(ctx context.Context, db *sql.DB) error {
-	// if context is canceled, sql will rollback the transaction and abort
-	tx, err := db.BeginTx(ctx, &sql.TxOptions{
-		ReadOnly:  true,
-		Isolation: sql.LevelReadCommitted,
-	})
-	if err != nil {
-		return cerrors.Errorf("failed to start transaction: %w", err)
-	}
+func (s *Snapshotter) loadRows(db *sql.DB) error {
 	query, args, err := psql.Select(s.columns...).From(s.table).ToSql()
 	if err != nil {
 		return cerrors.Errorf("failed to create read query: %w", err)
 	}
-	//nolint:sqlclosecheck,rowserrcheck // NB: both are called in Teardown
+	//nolint:sqlclosecheck,rowserrcheck
+	// NB: both are called in Teardown
 	// because we lock the table until we've read every row.
-	rows, err := tx.QueryContext(ctx, query, args...)
+	rows, err := s.db.Query(query, args...)
 	if err != nil {
 		return cerrors.Errorf("failed to query context: %w", err)
 	}
 	s.rows = rows
-	s.tx = tx
 	return nil
 }
 
 // withSnapshot is on by default and sets up a Snapshotter that takes a
 // snapshot in a transaction lock of the database before the main plugin
 // operations begin.
-func (s *Source) withSnapshot(ctx context.Context, cfg plugins.Config) error {
+func (s *Source) withSnapshot(cfg plugins.Config) error {
 	v, ok := cfg.Settings["snapshot"]
 	if ok {
 		switch v {
@@ -214,7 +191,7 @@ func (s *Source) withSnapshot(ctx context.Context, cfg plugins.Config) error {
 			return nil
 		}
 	}
-	snap, err := NewSnapshotter(ctx, s.db, s.table, s.columns, s.key)
+	snap, err := NewSnapshotter(s.db, s.table, s.columns, s.key)
 	if err != nil {
 		return cerrors.Errorf("failed to set snapshotter: %w", err)
 	}
