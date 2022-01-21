@@ -33,7 +33,7 @@ type Consumer interface {
 	// The group ID is significant for this consumer's offsets.
 	// By using the same group ID after a restart, we make sure that the consumer continues from where it left off.
 	// Returns: An error, if the consumer could not be set to read from the given position, nil otherwise.
-	StartFrom(config Config, groupId string) error
+	StartFrom(config Config, groupID string) error
 
 	// Get returns a message from the configured topic. Waits until a messages is available
 	// or until it errors out.
@@ -57,7 +57,7 @@ func NewConsumer() (Consumer, error) {
 	return &segmentConsumer{}, nil
 }
 
-func (c *segmentConsumer) StartFrom(config Config, groupId string) error {
+func (c *segmentConsumer) StartFrom(config Config, groupID string) error {
 	// todo if we can assume that a new Config instance will always be created by calling Parse(),
 	// and that the instance will not be mutated, then we can leave it out these checks.
 	if len(config.Servers) == 0 {
@@ -66,7 +66,7 @@ func (c *segmentConsumer) StartFrom(config Config, groupId string) error {
 	if config.Topic == "" {
 		return ErrTopicMissing
 	}
-	c.reader = newReader(config, groupId)
+	c.reader = newReader(config, groupID)
 	return nil
 }
 
