@@ -40,48 +40,25 @@ type Consumer interface {
 	Close()
 
 	// StartFrom instructs the consumer to connect to a broker and a topic, using the provided consumer group ID.
-	// The group ID is significant for this consumer offsets.
+	// The group ID is significant for this consumer's offsets.
 	// By using the same group ID after a restart, we make sure that the consumer continues from where it left off.
 	// Returns: An error, if the consumer could not be set to read from the given position, nil otherwise.
 	StartFrom(config Config, groupId string) error
 }
 
 type segmentConsumer struct {
-	// maps partition IDs to respective readers
-	// segmentio/kafka-go requires a reader per partition
 	reader      *kafka.Reader
 	lastMsgRead *kafka.Message
 }
 
 // NewConsumer creates a new Kafka consumer. The consumer needs to be started
 // (using the StartFrom method) before actually being used.
-func NewConsumer(Config) (Consumer, error) {
+func NewConsumer() (Consumer, error) {
 	return &segmentConsumer{}, nil
 }
 
-func newReader(cfg Config, groupId string) *kafka.Reader {
-	var startOffset int64
-	if cfg.ReadFromBeginning {
-		startOffset = kafka.FirstOffset
-	} else {
-		startOffset = kafka.LastOffset
-	}
-	readerCfg := kafka.ReaderConfig{
-		Brokers:               cfg.Servers,
-		Topic:                 cfg.Topic,
-		StartOffset:           startOffset,
-		WatchPartitionChanges: true,
-	}
-	if groupId == "" {
-		readerCfg.GroupID = uuid.NewString()
-	} else {
-		readerCfg.GroupID = groupId
-	}
-	return kafka.NewReader(readerCfg)
-}
-
 func (c *segmentConsumer) Get() (*kafka.Message, string, error) {
-	msg, err := c.reader.ReadMessage(context.Background())
+	msg, err := c.reader.FetchMessage(context.Background())
 	if err != nil {
 		return nil, "", cerrors.Errorf("couldn't read message: %w", err)
 	}
@@ -108,6 +85,27 @@ func (c *segmentConsumer) StartFrom(config Config, groupId string) error {
 	}
 	c.reader = newReader(config, groupId)
 	return nil
+}
+
+func newReader(cfg Config, groupId string) *kafka.Reader {
+	readerCfg := kafka.ReaderConfig{
+		Brokers:               cfg.Servers,
+		Topic:                 cfg.Topic,
+		WatchPartitionChanges: true,
+	}
+	// Group ID
+	if groupId == "" {
+		readerCfg.GroupID = uuid.NewString()
+	} else {
+		readerCfg.GroupID = groupId
+	}
+	// StartOffset
+	if cfg.ReadFromBeginning {
+		readerCfg.StartOffset = kafka.FirstOffset
+	} else {
+		readerCfg.StartOffset = kafka.LastOffset
+	}
+	return kafka.NewReader(readerCfg)
 }
 
 func (c *segmentConsumer) Close() {

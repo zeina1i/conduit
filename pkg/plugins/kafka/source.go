@@ -41,7 +41,7 @@ func (s *Source) Open(ctx context.Context, cfg plugins.Config) error {
 	}
 	s.Config = parsed
 
-	client, err := NewConsumer(s.Config)
+	client, err := NewConsumer()
 	if err != nil {
 		return cerrors.Errorf("failed to create Kafka client: %w", err)
 	}

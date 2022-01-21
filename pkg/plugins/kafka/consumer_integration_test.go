@@ -41,7 +41,7 @@ func TestConsumer_Get_FromBeginning(t *testing.T) {
 	createTopic(t, cfg.Topic)
 	sendTestMessages(t, cfg, 1, 6)
 
-	consumer, err := kafka.NewConsumer(cfg)
+	consumer, err := kafka.NewConsumer()
 	defer consumer.Close()
 	assert.Ok(t, err)
 
@@ -77,7 +77,7 @@ func TestConsumer_Get_OnlyNew(t *testing.T) {
 	createTopic(t, cfg.Topic)
 	sendTestMessages(t, cfg, 1, 6)
 
-	consumer, err := kafka.NewConsumer(cfg)
+	consumer, err := kafka.NewConsumer()
 	defer consumer.Close()
 	assert.Ok(t, err)
 
@@ -161,7 +161,7 @@ func TestGet_KafkaDown(t *testing.T) {
 	t.Parallel()
 
 	cfg := kafka.Config{Topic: "client_integration_test_topic", Servers: []string{"localhost:12345"}}
-	consumer, err := kafka.NewConsumer(cfg)
+	consumer, err := kafka.NewConsumer()
 	assert.Ok(t, err)
 
 	err = consumer.StartFrom(cfg, "")
