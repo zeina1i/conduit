@@ -70,17 +70,17 @@ func (c *segmentConsumer) StartFrom(config Config, groupID string) error {
 	return nil
 }
 
-func newReader(cfg Config, groupId string) *kafka.Reader {
+func newReader(cfg Config, groupID string) *kafka.Reader {
 	readerCfg := kafka.ReaderConfig{
 		Brokers:               cfg.Servers,
 		Topic:                 cfg.Topic,
 		WatchPartitionChanges: true,
 	}
 	// Group ID
-	if groupId == "" {
+	if groupID == "" {
 		readerCfg.GroupID = uuid.NewString()
 	} else {
-		readerCfg.GroupID = groupId
+		readerCfg.GroupID = groupID
 	}
 	// StartOffset
 	if cfg.ReadFromBeginning {

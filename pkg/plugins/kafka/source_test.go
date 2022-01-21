@@ -97,7 +97,6 @@ func TestRead_StartFromCalledOnce(t *testing.T) {
 		Return(testKafkaMsg(), pos, nil).
 		Times(2)
 
-
 	underTest := kafka.Source{Consumer: consumerMock, Config: cfg}
 	_, err := underTest.Read(context.TODO(), []byte(pos))
 	assert.Ok(t, err)
