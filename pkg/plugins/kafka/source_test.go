@@ -61,24 +61,24 @@ func TestReadPosition(t *testing.T) {
 
 	kafkaMsg := testKafkaMsg()
 	cfg := connectorCfg()
-	groupId := uuid.NewString()
+	groupID := uuid.NewString()
 
 	consumerMock := mock.NewConsumer(ctrl)
 	consumerMock.
 		EXPECT().
-		StartFrom(cfg, groupId)
+		StartFrom(cfg, groupID)
 	consumerMock.
 		EXPECT().
 		Get(gomock.Any()).
-		Return(kafkaMsg, groupId, nil)
+		Return(kafkaMsg, groupID, nil)
 
 	underTest := kafka.Source{Consumer: consumerMock, Config: cfg}
-	rec, err := underTest.Read(context.TODO(), []byte(groupId))
+	rec, err := underTest.Read(context.TODO(), []byte(groupID))
 	assert.Ok(t, err)
 	assert.Equal(t, rec.Key.Bytes(), kafkaMsg.Key)
 	assert.Equal(t, rec.Payload.Bytes(), kafkaMsg.Value)
 
-	assert.Equal(t, groupId, string(rec.Position))
+	assert.Equal(t, groupID, string(rec.Position))
 }
 
 func TestRead_StartFromCalledOnce(t *testing.T) {
