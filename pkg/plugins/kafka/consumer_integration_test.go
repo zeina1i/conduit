@@ -47,6 +47,7 @@ func TestConsumer_Get_FromBeginning(t *testing.T) {
 
 	err = consumer.StartFrom(cfg, uuid.NewString())
 	assert.Ok(t, err)
+	time.Sleep(4 * time.Second)
 
 	messagesUnseen := map[string]bool{
 		"test-key-1": true,
@@ -57,7 +58,7 @@ func TestConsumer_Get_FromBeginning(t *testing.T) {
 		"test-key-6": true,
 	}
 	for i := 1; i <= 6; i++ {
-		message, _, err := consumer.Get()
+		message, _, err := waitForMessage(consumer, 200 * time.Millisecond)
 		assert.NotNil(t, message)
 		assert.Ok(t, err)
 		delete(messagesUnseen, string(message.Key))
@@ -82,7 +83,7 @@ func TestConsumer_Get_OnlyNew(t *testing.T) {
 
 	err = consumer.StartFrom(cfg, uuid.NewString())
 	assert.Ok(t, err)
-	time.Sleep(5 * time.Second)
+	time.Sleep(4 * time.Second)
 
 	sendTestMessages(t, cfg, 7, 9)
 
@@ -92,12 +93,36 @@ func TestConsumer_Get_OnlyNew(t *testing.T) {
 		"test-key-9": true,
 	}
 	for i := 1; i <= 3; i++ {
-		message, _, err := consumer.Get()
+		message, _, err := waitForMessage(consumer, 200 * time.Millisecond)
 		assert.NotNil(t, message)
 		assert.Ok(t, err)
 		delete(messagesUnseen, string(message.Key))
 	}
 	assert.Equal(t, 0, len(messagesUnseen))
+}
+
+func waitForMessage(consumer kafka.Consumer, timeout time.Duration) (*skafka.Message, string, error) {
+	c := make(chan struct {
+		msg *skafka.Message
+		pos string
+		err error
+	})
+
+	go func() {
+		msg, pos, err := consumer.Get()
+		c <- struct {
+			msg *skafka.Message
+			pos string
+			err error
+		}{msg: msg, pos: pos, err: err}
+	}()
+
+	select {
+	case r := <-c:
+		return r.msg, r.pos, r.err // completed normally
+	case <-time.After(timeout):
+		return nil, "", cerrors.New("timed out while waiting for message") // timed out
+	}
 }
 
 func sendTestMessages(t *testing.T, cfg kafka.Config, from int, to int) {
