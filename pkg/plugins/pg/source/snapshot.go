@@ -155,14 +155,10 @@ func (s *Snapshotter) Teardown() error {
 	return interruptErr
 }
 
-// loadRows should get the rows of the initial query and then load it into the
-// Snapshotter which wraps it to the Iterator pattern.
-// * Starts a read only transaction for the snapshotter for the configured
-// table, key, and columns.
-// * When it's done reading, it commits that transaction and marks the
-// snapshot as completed.
-// * If a context cancellation is detected, it will rollback and return any
-// rows errors that were encountered.
+// loadRows loads the rows returned from the database onto the snapshotter
+// or returns an error.
+// * It returns nil if no error was detected.
+// * rows.Close and rows.Err are called at Teardown.
 func (s *Snapshotter) loadRows(db *sql.DB) error {
 	query, args, err := psql.Select(s.columns...).From(s.table).ToSql()
 	if err != nil {
@@ -177,9 +173,9 @@ func (s *Snapshotter) loadRows(db *sql.DB) error {
 	return nil
 }
 
-// withSnapshot is on by default and sets up a Snapshotter that takes a
-// snapshot in a transaction lock of the database before the main plugin
-// operations begin.
+// withSnapshot sets up snapshotter on the Source by default unless the
+// configuration turns it off. It returns an error if there's an issue during
+// setup and nil if the snapshotter has been turned off.
 func (s *Source) withSnapshot(cfg plugins.Config) error {
 	v, ok := cfg.Settings["snapshot"]
 	if ok {
