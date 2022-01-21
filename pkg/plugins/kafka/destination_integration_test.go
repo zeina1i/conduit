@@ -37,10 +37,6 @@ func TestDestination_Write_Simple(t *testing.T) {
 	createTopic(t, cfg.Settings[kafka.Topic])
 	record := testRecord()
 
-	// Kafka is started in Docker
-	reader := newKafkaReader(cfg.Settings[kafka.Topic])
-	defer reader.Close()
-
 	// prepare SUT
 	underTest := kafka.Destination{}
 	openErr := underTest.Open(context.Background(), cfg)
@@ -53,9 +49,18 @@ func TestDestination_Write_Simple(t *testing.T) {
 	assert.Equal(t, record.Position, result)
 
 	// todo wait at most a certain amount of time
-	message, err := reader.ReadMessage(context.Background())
+	message, err := waitForReaderMessage(cfg.Settings[kafka.Topic], 4000*time.Millisecond)
 	assert.Ok(t, err)
 	assert.Equal(t, record.Payload.Bytes(), message.Value)
+}
+
+func waitForReaderMessage(topic string, timeout time.Duration) (skafka.Message, error) {
+	// Kafka is started in Docker
+	reader := newKafkaReader(topic)
+	defer reader.Close()
+
+	withTimeout, _ := context.WithTimeout(context.Background(), timeout)
+	return reader.ReadMessage(withTimeout)
 }
 
 func newTestConfig(t *testing.T) plugins.Config {
