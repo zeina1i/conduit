@@ -69,7 +69,7 @@ func TestReadPosition(t *testing.T) {
 		StartFrom(cfg, groupId)
 	consumerMock.
 		EXPECT().
-		Get().
+		Get(gomock.Any()).
 		Return(kafkaMsg, groupId, nil)
 
 	underTest := kafka.Source{Consumer: consumerMock, Config: cfg}
@@ -93,7 +93,7 @@ func TestRead_StartFromCalledOnce(t *testing.T) {
 		StartFrom(cfg, pos)
 	consumerMock.
 		EXPECT().
-		Get().
+		Get(gomock.Any()).
 		Return(testKafkaMsg(), pos, nil).
 		Times(2)
 
@@ -118,7 +118,7 @@ func TestRead(t *testing.T) {
 		StartFrom(cfg, pos)
 	consumerMock.
 		EXPECT().
-		Get().
+		Get(gomock.Any()).
 		Return(kafkaMsg, pos, nil)
 
 	underTest := kafka.Source{Consumer: consumerMock, Config: cfg}

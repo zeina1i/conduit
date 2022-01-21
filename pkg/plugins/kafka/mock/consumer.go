@@ -5,6 +5,7 @@
 package mock
 
 import (
+	context "context"
 	reflect "reflect"
 
 	kafka "github.com/conduitio/conduit/pkg/plugins/kafka"
@@ -62,9 +63,9 @@ func (mr *ConsumerMockRecorder) Close() *gomock.Call {
 }
 
 // Get mocks base method.
-func (m *Consumer) Get() (*kafka0.Message, string, error) {
+func (m *Consumer) Get(arg0 context.Context) (*kafka0.Message, string, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "Get")
+	ret := m.ctrl.Call(m, "Get", arg0)
 	ret0, _ := ret[0].(*kafka0.Message)
 	ret1, _ := ret[1].(string)
 	ret2, _ := ret[2].(error)
@@ -72,9 +73,9 @@ func (m *Consumer) Get() (*kafka0.Message, string, error) {
 }
 
 // Get indicates an expected call of Get.
-func (mr *ConsumerMockRecorder) Get() *gomock.Call {
+func (mr *ConsumerMockRecorder) Get(arg0 interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Get", reflect.TypeOf((*Consumer)(nil).Get))
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Get", reflect.TypeOf((*Consumer)(nil).Get), arg0)
 }
 
 // StartFrom mocks base method.
