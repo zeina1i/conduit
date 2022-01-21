@@ -168,9 +168,7 @@ func (s *Snapshotter) loadRows(db *sql.DB) error {
 	if err != nil {
 		return cerrors.Errorf("failed to create read query: %w", err)
 	}
-	//nolint:sqlclosecheck,rowserrcheck
-	// NB: both are called in Teardown
-	// because we lock the table until we've read every row.
+	//nolint:sqlclosecheck,rowserrcheck //both are called at teardown
 	rows, err := s.db.Query(query, args...)
 	if err != nil {
 		return cerrors.Errorf("failed to query context: %w", err)

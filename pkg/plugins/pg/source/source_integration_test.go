@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// //go:build integration
+//go:build integration
 
 package source
 
@@ -216,13 +216,15 @@ func TestCDC(t *testing.T) {
 	})
 	assert.Ok(t, err)
 	t.Cleanup(func() { assert.Ok(t, s.Teardown()) })
-	_, err = s.db.Query(`insert into records(id, column1, column2, column3)
+	rows, err := s.db.Query(`insert into records(id, column1, column2, column3)
 	values (6, 'bizz', 456, false);`)
 	assert.Ok(t, err)
+	assert.Ok(t, rows.Err())
 	assert.Equal(t, s.key, "id")
 	assert.Equal(t, []string{"id", "key", "column1", "column2", "column3"},
 		s.columns)
 	assert.True(t, s.cdc != nil, "failed to set cdc default")
+	// load bearing sleep because we have to wait on postgres.
 	time.Sleep(1 * time.Second)
 	assert.True(t, s.cdc.HasNext(), "failed to queue up a cdc record")
 	rec2, err := s.Read(context.Background(), nil)
@@ -248,19 +250,22 @@ func TestCDCIterator(t *testing.T) {
 		},
 	})
 	assert.Ok(t, err)
-	t.Cleanup(func() { s.Teardown() })
+	t.Cleanup(func() { assert.Ok(t, s.Teardown()) })
 	rec, err := s.Read(context.Background(), nil)
 	assert.Equal(t, rec, record.Record{})
 	assert.True(t, cerrors.Is(err, plugins.ErrEndData),
 		"failed to get errenddata")
-	// insert events now that cdc mode is setup
-	_, err = s.db.Query(`insert into records(column1, column2, column3) 
+	// insert events to populate the cdc channel
+	rows, err := s.db.Query(`insert into records(column1, column2, column3) 
 	values ('biz', 666, false);`)
 	assert.Ok(t, err)
+	assert.Ok(t, rows.Err())
+	// load bearing sleep because we have to wait on postgres.
 	time.Sleep(1 * time.Second)
 	assert.True(t, s.cdc.HasNext(), "failed to queue cdc record")
 	rec, err = s.cdc.Next()
 	assert.Ok(t, err)
+	assert.True(t, len(rec.Payload.Bytes()) > 0, "failed to get cdc payload")
 }
 
 // getTestPostgres is a testing helper that fails if it can't setup a Postgres
