@@ -17,7 +17,6 @@ package kafka
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"time"
 
@@ -67,7 +66,7 @@ func (s *Source) Read(ctx context.Context, position record.Position) (record.Rec
 		return record.Record{}, cerrors.Errorf("couldn't start from position: %w", err)
 	}
 
-	message, kafkaPos, err := s.Consumer.Get()
+	message, kafkaPos, err := s.Consumer.Get(ctx)
 	if err != nil {
 		return record.Record{}, cerrors.Errorf("failed getting a message %w", err)
 	}
@@ -94,19 +93,6 @@ func (s *Source) startFrom(position record.Position) error {
 	}
 	s.lastPositionRead = position
 	return nil
-}
-
-func toKafkaPosition(position record.Position) (map[int]int64, error) {
-	if position == nil || len(position) == 0 {
-		return map[int]int64{}, nil
-	}
-
-	var p map[int]int64
-	err := json.Unmarshal(position, &p)
-	if err != nil {
-		return nil, cerrors.Errorf("couldn't deserialize position %w", err)
-	}
-	return p, nil
 }
 
 func toRecord(message *kafka.Message, position string) (record.Record, error) {

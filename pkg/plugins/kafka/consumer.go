@@ -29,21 +29,21 @@ import (
 // with just the functionality which is needed for this plugin.
 // A Consumer's offset is being managed by the broker.
 type Consumer interface {
-	// Get returns a message from the configured topic. Waits until a messages is available
-	// or until it errors out.
-	// Returns: a message (if available), the consumer group ID and an error (if there was one).
-	Get() (*kafka.Message, string, error)
-
-	Ack() error
-
-	// Close this consumer and the associated resources (e.g. connections to the broker)
-	Close()
-
 	// StartFrom instructs the consumer to connect to a broker and a topic, using the provided consumer group ID.
 	// The group ID is significant for this consumer's offsets.
 	// By using the same group ID after a restart, we make sure that the consumer continues from where it left off.
 	// Returns: An error, if the consumer could not be set to read from the given position, nil otherwise.
 	StartFrom(config Config, groupId string) error
+
+	// Get returns a message from the configured topic. Waits until a messages is available
+	// or until it errors out.
+	// Returns: a message (if available), the consumer group ID and an error (if there was one).
+	Get(ctx context.Context) (*kafka.Message, string, error)
+
+	Ack() error
+
+	// Close this consumer and the associated resources (e.g. connections to the broker)
+	Close()
 }
 
 type segmentConsumer struct {
@@ -55,23 +55,6 @@ type segmentConsumer struct {
 // (using the StartFrom method) before actually being used.
 func NewConsumer() (Consumer, error) {
 	return &segmentConsumer{}, nil
-}
-
-func (c *segmentConsumer) Get() (*kafka.Message, string, error) {
-	msg, err := c.reader.FetchMessage(context.Background())
-	if err != nil {
-		return nil, "", cerrors.Errorf("couldn't read message: %w", err)
-	}
-	c.lastMsgRead = &msg
-	return &msg, c.readerID(), nil
-}
-
-func (c *segmentConsumer) Ack() error {
-	err := c.reader.CommitMessages(context.Background(), *c.lastMsgRead)
-	if err != nil {
-		return cerrors.Errorf("could't commit messages: %w", err)
-	}
-	return nil
 }
 
 func (c *segmentConsumer) StartFrom(config Config, groupId string) error {
@@ -106,6 +89,23 @@ func newReader(cfg Config, groupId string) *kafka.Reader {
 		readerCfg.StartOffset = kafka.LastOffset
 	}
 	return kafka.NewReader(readerCfg)
+}
+
+func (c *segmentConsumer) Get(ctx context.Context) (*kafka.Message, string, error) {
+	msg, err := c.reader.FetchMessage(ctx)
+	if err != nil {
+		return nil, "", cerrors.Errorf("couldn't read message: %w", err)
+	}
+	c.lastMsgRead = &msg
+	return &msg, c.readerID(), nil
+}
+
+func (c *segmentConsumer) Ack() error {
+	err := c.reader.CommitMessages(context.Background(), *c.lastMsgRead)
+	if err != nil {
+		return cerrors.Errorf("couldn't commit messages: %w", err)
+	}
+	return nil
 }
 
 func (c *segmentConsumer) Close() {
