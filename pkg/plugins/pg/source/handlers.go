@@ -28,7 +28,6 @@ func (s *Source) handleInsert(relID pgtype.OID,
 	values map[string]pgtype.Value,
 	pos uint64,
 ) error {
-	log.Printf("insert hit - %v", values)
 	rec := record.Record{
 		CreatedAt: time.Now(),
 		Metadata: map[string]string{
@@ -52,7 +51,6 @@ func (s *Source) handleUpdate(
 	values map[string]pgtype.Value,
 	pos uint64,
 ) error {
-	log.Printf("update hit - %v", values)
 	rec := record.Record{
 		// TODO: Fill out key and add payload and metadata
 		CreatedAt: time.Now(),
@@ -78,9 +76,7 @@ func (s *Source) handleDelete(
 	values map[string]pgtype.Value,
 	pos uint64,
 ) error {
-	log.Printf("delete hit - %v", values)
 	rec := record.Record{
-		// TODO: Fill out key and add payload and metadata
 		Metadata: map[string]string{
 			"action": "delete",
 			"table":  s.table,

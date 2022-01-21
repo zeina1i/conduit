@@ -16,12 +16,21 @@
 
 package source
 
+// State should not be shared between tests, so any test that relies on a
+// logical replication slot should have its own slot and publication name for
+// the test.
+// Assigning tests unique slot names also means we can relate container logs
+// to specific tests when debugging.
+// Any test that calls `Open` successfully should call `Teardown`.
+
 import (
 	"context"
 	"database/sql"
 	"testing"
+	"time"
 
 	"github.com/conduitio/conduit/pkg/foundation/assert"
+	"github.com/conduitio/conduit/pkg/foundation/cerrors"
 	"github.com/conduitio/conduit/pkg/plugins"
 	"github.com/conduitio/conduit/pkg/record"
 
@@ -145,10 +154,10 @@ func TestSource_Open(t *testing.T) {
 				key:     tt.fields.key,
 				db:      nil,
 			}
+			t.Cleanup(func() { assert.Ok(t, s.Teardown()) })
 			if err := s.Open(tt.args.ctx, tt.args.cfg); (err != nil) != tt.wantErr {
 				t.Errorf("Source.Open() error = %v, wantErr %v", err, tt.wantErr)
 			}
-			assert.Ok(t, s.Teardown())
 		})
 	}
 }
@@ -164,14 +173,13 @@ func TestValidateDisabledSettings(t *testing.T) {
 			"cdc":      "disabled",
 		},
 	}
+	t.Cleanup(func() { assert.Ok(t, s.Teardown()) })
 	err := s.Validate(cfg)
 	assert.Ok(t, err)
 	err = s.Open(context.Background(), cfg)
 	assert.Ok(t, err)
 	assert.Equal(t, nil, s.snapshotter)
 	assert.Equal(t, nil, s.cdc)
-	err = s.Teardown()
-	assert.Ok(t, err)
 }
 
 func TestOpen_Defaults(t *testing.T) {
@@ -179,19 +187,19 @@ func TestOpen_Defaults(t *testing.T) {
 	s := &Source{}
 	err := s.Open(context.Background(), plugins.Config{
 		Settings: map[string]string{
-			"table": "records",
-			"url":   RepDBURL,
+			"table":            "records",
+			"url":              RepDBURL,
+			"slot_name":        "meroxatestdefaults",
+			"publication_name": "meroxatestdefaults",
 		},
 	})
 	assert.Ok(t, err)
+	t.Cleanup(func() { assert.Equal(t, ErrSnapshotInterrupt, s.Teardown()) })
 	assert.Equal(t, s.key, "id")
 	assert.Equal(t, []string{"id", "key", "column1", "column2", "column3"},
 		s.columns)
 	assert.True(t, s.snapshotter != nil, "failed to set snapshotter default")
 	assert.True(t, s.cdc != nil, "failed to set cdc default")
-	// TODO: This context needs to cancel the server correctly
-	err = s.Teardown()
-	assert.Ok(t, err)
 }
 
 func TestCDC(t *testing.T) {
@@ -202,30 +210,57 @@ func TestCDC(t *testing.T) {
 			"table":            "records",
 			"url":              RepDBURL,
 			"snapshot":         "disabled",
-			"slot_name":        "meroxa",
-			"publication_name": "meroxa",
+			"slot_name":        "meroxatestcdc",
+			"publication_name": "meroxatestcdc",
 		},
 	})
+	assert.Ok(t, err)
+	t.Cleanup(func() { assert.Ok(t, s.Teardown()) })
+	_, err = s.db.Query(`insert into records(id, column1, column2, column3)
+	values (6, 'bizz', 456, false);`)
 	assert.Ok(t, err)
 	assert.Equal(t, s.key, "id")
 	assert.Equal(t, []string{"id", "key", "column1", "column2", "column3"},
 		s.columns)
 	assert.True(t, s.cdc != nil, "failed to set cdc default")
-	rec1, err := s.Read(context.Background(), nil)
-	assert.Equal(t, err, plugins.ErrEndData)
-	assert.Equal(t, record.Record{}, rec1)
-
-	// add records and assert that we  didn't error
-	_, err = s.db.Query(`insert into records(column1, column2, column3)
-	values ('bizz', 456, false);`)
+	time.Sleep(1 * time.Second)
+	assert.True(t, s.cdc.HasNext(), "failed to queue up a cdc record")
+	rec2, err := s.Read(context.Background(), nil)
 	assert.Ok(t, err)
+	assert.Equal(t, map[string]string{
+		"table":  "records",
+		"action": "insert",
+	}, rec2.Metadata)
+	assert.True(t, rec2.Position.String() != "<nil>", "failed to set position")
+}
 
-	// assert that we received cdc events
-	_, err = s.Read(context.Background(), nil)
+func TestCDCIterator(t *testing.T) {
+	_ = getTestPostgres(t)
+	s := Source{}
+	err := s.Open(context.Background(), plugins.Config{
+		Settings: map[string]string{
+			"table": "records",
+			"url":   RepDBURL,
+			// disable snapshot mode since it's not being tested
+			"snapshot":         "disabled",
+			"slot_name":        "meroxatestiterator",
+			"publication_name": "meroxatestiterator",
+		},
+	})
 	assert.Ok(t, err)
-
-	// okay so this test should be working but CDC mode is _not_ working.
-	// Once it is this test should get a different result.
+	t.Cleanup(func() { s.Teardown() })
+	rec, err := s.Read(context.Background(), nil)
+	assert.Equal(t, rec, record.Record{})
+	assert.True(t, cerrors.Is(err, plugins.ErrEndData),
+		"failed to get errenddata")
+	// insert events now that cdc mode is setup
+	_, err = s.db.Query(`insert into records(column1, column2, column3) 
+	values ('biz', 666, false);`)
+	assert.Ok(t, err)
+	time.Sleep(1 * time.Second)
+	assert.True(t, s.cdc.HasNext(), "failed to queue cdc record")
+	rec, err = s.cdc.Next()
+	assert.Ok(t, err)
 }
 
 // getTestPostgres is a testing helper that fails if it can't setup a Postgres

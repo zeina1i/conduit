@@ -17,12 +17,10 @@
 package source
 
 import (
-	"context"
 	"testing"
 
 	"github.com/conduitio/conduit/pkg/foundation/assert"
 	"github.com/conduitio/conduit/pkg/foundation/cerrors"
-	"github.com/conduitio/conduit/pkg/plugins"
 	"github.com/conduitio/conduit/pkg/record"
 )
 
@@ -86,29 +84,4 @@ func TestPrematureDBClose(t *testing.T) {
 	assert.Equal(t, rec, record.Record{})
 	assert.True(t, cerrors.Is(err, ErrNoRows),
 		"failed to get snapshot incomplete")
-}
-
-func TestCDCIterator(t *testing.T) {
-	s := Source{}
-	err := s.Open(context.Background(), plugins.Config{
-		Settings: map[string]string{
-			"table": "records",
-			"url":   RepDBURL,
-			// disable snapshot mode since it's not being tested
-			"snapshot": "disabled",
-		},
-	})
-	assert.Ok(t, err)
-	t.Cleanup(func() { s.Teardown() })
-	rec, err := s.Read(context.Background(), nil)
-	assert.Equal(t, rec, record.Record{})
-	assert.True(t, cerrors.Is(err, plugins.ErrEndData),
-		"failed to get errenddata")
-	// insert events now that cdc mode is setup
-	_, err = s.db.Query(`insert into records(column1, column2, column3) 
-	values ('biz', 666, false);`)
-	assert.Ok(t, err)
-	rec, err = s.cdc.Next()
-	assert.Ok(t, err)
-	assert.NotNil(t, rec)
 }

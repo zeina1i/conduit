@@ -69,7 +69,8 @@ type Source struct {
 	cdc Iterator
 	// snapshotter takes an Iterator of a snapshot of the database
 	snapshotter Iterator
-	// killswitch ...
+	// killswitch holds a context cancel that hooks into the postgres logical
+	// replication subscription.
 	killswitch context.CancelFunc
 }
 
@@ -112,7 +113,6 @@ func (s *Source) Teardown() error {
 	log.Printf("attempting graceful shutdown...")
 	var teardownErr, dbErr error
 	if s.snapshotter != nil {
-		log.Printf("tearing down snapshotter")
 		teardownErr = s.snapshotter.Teardown()
 	}
 	if s.killswitch != nil {
@@ -122,7 +122,6 @@ func (s *Source) Teardown() error {
 	s.subWG.Wait()
 	// check that db exists before trying to close it.
 	if s.db != nil {
-		log.Printf("closing postgres connection")
 		dbErr = s.db.Close()
 	}
 	return multierror.Append(dbErr, s.subErr, teardownErr)
@@ -173,7 +172,6 @@ func (s *Source) Read(ctx context.Context, _ record.Position) (record.Record, er
 	if s.cdc != nil {
 		if s.cdc.HasNext() {
 			next, err := s.cdc.Next()
-			log.Printf("CDC RECORD %v - error: %v", next, err)
 			return next, err
 		}
 	}

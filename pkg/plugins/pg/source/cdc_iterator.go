@@ -15,8 +15,6 @@
 package source
 
 import (
-	"log"
-
 	"github.com/conduitio/conduit/pkg/record"
 )
 
@@ -40,7 +38,6 @@ func NewIterator(rch chan record.Record) *CDCIterator {
 
 // HasNext returns true if there is an item in the buffer.
 func (i *CDCIterator) HasNext() bool {
-	log.Printf("cdc has next hit")
 	return len(i.buffer) > 0
 }
 
@@ -48,14 +45,12 @@ func (i *CDCIterator) HasNext() bool {
 // so it should only be called if we've checked that HasNext is true or else
 // it will block until a record is inserted into the queue.
 func (i *CDCIterator) Next() (record.Record, error) {
-	log.Printf("cdciterator next hit")
 	r := <-i.buffer
 	return r, nil
 }
 
 // Push appends a Record to the buffer.
 func (i *CDCIterator) Push(r record.Record) {
-	log.Printf("pushing record: %v", r)
 	i.buffer <- r
 }
 
