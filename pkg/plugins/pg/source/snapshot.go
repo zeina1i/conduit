@@ -15,7 +15,6 @@
 package source
 
 import (
-	"context"
 	"database/sql"
 	"log"
 
@@ -148,9 +147,7 @@ func (s *Snapshotter) Teardown() error {
 	}
 	rowsErr := s.rows.Err()
 	if rowsErr != nil {
-		if rowsErr != context.Canceled {
-			return cerrors.Errorf("rows error: %w", rowsErr)
-		}
+		return cerrors.Errorf("rows error: %w", rowsErr)
 	}
 	return interruptErr
 }
